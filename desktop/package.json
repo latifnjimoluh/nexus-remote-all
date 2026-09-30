@@ -9,7 +9,6 @@
     "copy-assets": "node scripts/copy-assets.cjs",
     "start": "npm run copy-assets && electron .",
     "dev": "npm run copy-assets && electron .",
-    "rebuild": "electron-rebuild -f -w @nut-tree-fork/libnut-win32",
     "dist": "npm run copy-assets && electron-builder --win",
     "pack": "npm run copy-assets && electron-builder --win --dir"
   },
@@ -30,6 +29,7 @@
     "appId": "com.nexus.remoteall",
     "productName": "Nexus Remote All",
     "electronVersion": "33.4.11",
+    "npmRebuild": false,
     "asar": false,
     "directories": {
       "output": "release",
@@ -58,9 +58,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Nexus Remote All",
-      "installerIcon": "assets/icon.png",
-      "uninstallerIcon": "assets/icon.png"
+      "shortcutName": "Nexus Remote All"
     }
   }
 }
