@@ -1,15 +1,20 @@
-import type { Command } from "../../../shared/protocol.js";
 import * as Mouse from "../controllers/mouse.js";
 import * as Kbd from "../controllers/keyboard.js";
 import * as Media from "../controllers/media.js";
 import * as Sys from "../controllers/system.js";
 import { launch } from "../controllers/launcher.js";
+import { validateCommand } from "../validate.js";
 
 /**
- * Aiguille chaque commande reçue vers le contrôleur adéquat.
- * Le `switch` exhaustif garantit (via TypeScript) qu'aucun type n'est oublié.
+ * Valide (F3) puis aiguille chaque commande reçue vers le contrôleur adéquat.
+ * `raw` est la charge JSON brute et non fiable ; la validation rejette toute
+ * commande malformée avant exécution. Le `switch` exhaustif garantit (via
+ * TypeScript) qu'aucun type de commande n'est oublié.
  */
-export async function handleCommand(cmd: Command): Promise<void> {
+export async function handleCommand(raw: unknown): Promise<void> {
+  const cmd = validateCommand(raw);
+  if (!cmd) throw new Error("Commande invalide ou malformée");
+
   switch (cmd.type) {
     // --- Souris ---
     case "mouse:move":

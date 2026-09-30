@@ -1,4 +1,3 @@
-import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import express from "express";
@@ -10,7 +9,8 @@ import { verifyToken } from "./auth/middleware.js";
 import { pairingRouter, createPairingInfo } from "./auth/pairing.js";
 import { publishService } from "./discovery/mdns.js";
 import { startRelayClient } from "./relay-client.js";
-import type { Command, ServerMessage } from "../../shared/protocol.js";
+import { getLocalIp, localAddresses } from "./net.js";
+import type { ServerMessage } from "../../shared/protocol.js";
 
 // Protection contre les interruptions intempestives
 process.on("uncaughtException", (err) => {
@@ -20,34 +20,6 @@ process.on("unhandledRejection", (reason) => {
   console.error("[Serveur] Rejet de promesse non géré :", reason);
 });
 
-/**
- * Retourne l'IPv4 LAN réelle de l'hôte (adresse joignable par le smartphone).
- * Écarte les interfaces virtuelles (VMware, VirtualBox, WSL/Hyper-V, VPN, Docker…)
- * et les adresses APIPA (169.254.x), puis préfère la carte Wi-Fi, sinon Ethernet.
- */
-function getLocalIp(): string {
-  const candidates: Array<{ name: string; address: string }> = [];
-  for (const [name, addrs] of Object.entries(networkInterfaces())) {
-    for (const net of addrs ?? []) {
-      if (net.family !== "IPv4" || net.internal) continue;
-      if (net.address.startsWith("169.254.")) continue; // APIPA / link-local
-      candidates.push({ name, address: net.address });
-    }
-  }
-
-  const VIRTUAL =
-    /vmware|virtualbox|vbox|vethernet|hyper-?v|wsl|loopback|bluetooth|vpn|tap-?windows|tunnel|tun\d|docker|npcap/i;
-  const physical = candidates.filter((c) => !VIRTUAL.test(c.name));
-  const pool = physical.length > 0 ? physical : candidates;
-
-  const chosen =
-    pool.find((c) => /wi-?fi|wireless|wlan|sans[- ]?fil/i.test(c.name)) ??
-    pool.find((c) => /ethernet|eth\d|en0/i.test(c.name)) ??
-    pool[0];
-
-  return chosen?.address ?? "127.0.0.1";
-}
-
 const ip = getLocalIp();
 
 // ─────────────────────────────────────────────────────────────
@@ -55,6 +27,19 @@ const ip = getLocalIp();
 // ─────────────────────────────────────────────────────────────
 const app = express();
 app.use(express.json());
+
+// F2 — Anti DNS-rebinding : n'accepter que les requêtes dont l'en-tête Host
+// pointe vers une adresse locale de la machine (localhost / IP LAN). Bloque
+// l'accès depuis un domaine tiers qui aurait été rebindé sur l'IP locale.
+const LOCAL_HOSTS = localAddresses();
+app.use((req, res, next) => {
+  const host = (req.headers.host ?? "").split(":")[0].toLowerCase();
+  if (!LOCAL_HOSTS.has(host)) {
+    res.status(403).json({ error: "Hôte non autorisé (protection anti DNS-rebinding)." });
+    return;
+  }
+  next();
+});
 
 // Distribution PWA : sert le dossier client/dist si compilé
 const clientDistCandidates = [
@@ -89,13 +74,29 @@ app.listen(CONFIG.HTTP_PORT, () => {
 const wss = new WebSocketServer({
   port: CONFIG.WS_PORT,
   verifyClient: (info, callback) => {
+    // F2 — anti DNS-rebinding : si un Origin de navigateur est présent, son hôte
+    // doit être local. (Origin absent = client non-navigateur : app native / test.)
+    const origin = info.origin;
+    if (origin) {
+      let originHost = "\0";
+      try {
+        originHost = new URL(origin).hostname.toLowerCase();
+      } catch {
+        originHost = "\0";
+      }
+      if (!LOCAL_HOSTS.has(originHost)) {
+        console.warn(`Connexion WebSocket refusée : origine non autorisée (${origin})`);
+        callback(false, 403, "Forbidden origin");
+        return;
+      }
+    }
     const token = new URL(info.req.url ?? "", "http://x").searchParams.get("token");
     if (!verifyToken(token)) {
       console.warn("Connexion WebSocket locale refusée : token manquant ou invalide");
       callback(false, 401, "Unauthorized");
-    } else {
-      callback(true);
+      return;
     }
+    callback(true);
   },
 });
 
@@ -103,21 +104,26 @@ wss.on("connection", (ws) => {
   console.log("Client local connecté ✔");
 
   ws.on("message", async (raw) => {
-    let cmd: Command;
+    let parsed: unknown;
     try {
-      cmd = JSON.parse(raw.toString()) as Command;
+      parsed = JSON.parse(raw.toString());
     } catch {
       return ws.send(
         JSON.stringify({ type: "error", payload: "JSON invalide" } satisfies ServerMessage),
       );
     }
 
+    const cmdType =
+      typeof parsed === "object" && parsed !== null
+        ? ((parsed as { type?: unknown }).type as ServerMessage["cmd"])
+        : undefined;
+
     try {
-      await handleCommand(cmd);
-      ws.send(JSON.stringify({ type: "ack", cmd: cmd.type } satisfies ServerMessage));
+      await handleCommand(parsed); // validation F3 effectuée dans handleCommand
+      ws.send(JSON.stringify({ type: "ack", cmd: cmdType } satisfies ServerMessage));
     } catch (e) {
       ws.send(
-        JSON.stringify({ type: "error", cmd: cmd.type, payload: String(e) } satisfies ServerMessage),
+        JSON.stringify({ type: "error", cmd: cmdType, payload: String(e) } satisfies ServerMessage),
       );
     }
   });

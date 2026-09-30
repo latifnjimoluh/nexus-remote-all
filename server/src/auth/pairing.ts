@@ -4,8 +4,21 @@ import { existsSync } from "node:fs";
 import jwt from "jsonwebtoken";
 import QRCode from "qrcode";
 import { CONFIG } from "../config.js";
+import { getLocalIp } from "../net.js";
 
 export const pairingRouter = Router();
+
+// F1 — L'appairage n'est accessible QUE depuis le PC hôte (localhost) : empêche
+// un appareil du LAN d'obtenir un jeton d'accès sans voir l'écran de l'hôte.
+// Le mobile, lui, reçoit le jeton en scannant le QR affiché à l'écran.
+pairingRouter.use((req, res, next) => {
+  const ra = (req.socket.remoteAddress ?? "").replace("::ffff:", "");
+  if (ra === "127.0.0.1" || ra === "::1") {
+    next();
+    return;
+  }
+  res.status(403).json({ error: "Appairage accessible uniquement depuis le PC hôte." });
+});
 
 export interface PairingInfo {
   token: string;
@@ -36,8 +49,7 @@ export async function createPairingInfo(ip: string): Promise<PairingInfo> {
 // Endpoint API : données d'appairage
 pairingRouter.get("/qr", async (req, res) => {
   try {
-    const hostHeader = req.headers.host?.split(":")[0] ?? "127.0.0.1";
-    const info = await createPairingInfo(hostHeader);
+    const info = await createPairingInfo(getLocalIp());
     res.json(info);
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -47,8 +59,7 @@ pairingRouter.get("/qr", async (req, res) => {
 // Endpoint HTML : page visuelle avec QR Code pour affichage sur l'écran du PC
 pairingRouter.get("/display", async (req, res) => {
   try {
-    const hostHeader = req.headers.host?.split(":")[0] ?? "127.0.0.1";
-    const info = await createPairingInfo(hostHeader);
+    const info = await createPairingInfo(getLocalIp());
     res.send(`
       <!DOCTYPE html>
       <html lang="fr">
