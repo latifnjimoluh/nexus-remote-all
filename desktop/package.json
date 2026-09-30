@@ -1,0 +1,66 @@
+{
+  "name": "@nexus/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Application de bureau Nexus Remote All — agent PC + appairage mobile (Electron).",
+  "author": "Nexus Remote All",
+  "main": "main.cjs",
+  "scripts": {
+    "copy-assets": "node scripts/copy-assets.cjs",
+    "start": "npm run copy-assets && electron .",
+    "dev": "npm run copy-assets && electron .",
+    "rebuild": "electron-rebuild -f -w @nut-tree-fork/libnut-win32",
+    "dist": "npm run copy-assets && electron-builder --win",
+    "pack": "npm run copy-assets && electron-builder --win --dir"
+  },
+  "dependencies": {
+    "@nut-tree-fork/nut-js": "^4.2.6",
+    "bonjour-service": "^1.4.4",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "electron": "33.4.11",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.nexus.remoteall",
+    "productName": "Nexus Remote All",
+    "electronVersion": "33.4.11",
+    "asar": false,
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "ui/**",
+      "assets/**",
+      "agent-dist/**",
+      "client-dist/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Nexus Remote All",
+      "installerIcon": "assets/icon.png",
+      "uninstallerIcon": "assets/icon.png"
+    }
+  }
+}

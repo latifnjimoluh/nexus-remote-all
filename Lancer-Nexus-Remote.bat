@@ -22,6 +22,9 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
+:: Activation du relais Cloud chiffré E2E (remote.unlineservice.com)
+set NEXUS_CLOUD=1
+
 :: Lancement du serveur agent avec liaison Cloud automatique
 node server/dist/server/src/index.js
 

@@ -1,0 +1,9 @@
+# Bundles copiés à la construction (générés par scripts/copy-assets.cjs)
+agent-dist/
+client-dist/
+
+# Sortie de l'installeur electron-builder
+release/
+
+# Cache electron-builder
+node_modules/

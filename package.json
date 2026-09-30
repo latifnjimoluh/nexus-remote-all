@@ -10,7 +10,8 @@
   "workspaces": [
     "server",
     "client",
-    "relay"
+    "relay",
+    "desktop"
   ],
   "scripts": {
     "dev:server": "npm run dev -w server",
@@ -18,11 +19,18 @@
     "dev:relay": "npm run dev -w relay",
     "dev": "concurrently -n server,client -c blue,magenta \"npm:dev:server\" \"npm:dev:client\"",
     "build": "npm run build -w server && npm run build -w client && npm run build -w relay",
+    "desktop": "npm run dev -w desktop",
+    "desktop:dist": "npm run build -w server && npm run build -w client && npm run dist -w desktop",
     "start": "npm run start -w server",
     "test": "node test_e2e.mjs",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w client && npm run typecheck -w relay"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "concurrently": "^9.1.0",
+    "fs-extra": "^11.4.1"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "esbuild@0.28.2": true
   }
 }

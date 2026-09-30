@@ -1,10 +1,9 @@
 import { Router } from "express";
-import { join } from "node:path";
-import { existsSync } from "node:fs";
 import jwt from "jsonwebtoken";
 import QRCode from "qrcode";
 import { CONFIG } from "../config.js";
 import { getLocalIp } from "../net.js";
+import { getClientDist } from "../state.js";
 
 export const pairingRouter = Router();
 
@@ -27,10 +26,7 @@ export interface PairingInfo {
 }
 
 export function isClientBuilt(): boolean {
-  return (
-    existsSync(join(process.cwd(), "../client/dist")) ||
-    existsSync(join(process.cwd(), "client/dist"))
-  );
+  return getClientDist() !== null;
 }
 
 /** Génère un token JWT signé et l'URL complète d'appairage. */

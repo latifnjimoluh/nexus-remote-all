@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'unsafe-inline';" />
+  <title>Nexus Remote All</title>
+  <style>
+    :root {
+      --bg: #0a0a0f; --card: #15151f; --border: #1e1e2b; --muted: #8a8a9a;
+      --accent: #6d5efc; --accent-soft: #6d5efc22; --ok: #3ddc84; --text: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
+      font-family: system-ui, "Segoe UI", sans-serif; display: flex;
+      flex-direction: column; align-items: center; padding: 24px 18px 28px;
+    }
+    header { text-align: center; margin-bottom: 4px; }
+    h1 { font-size: 1.35rem; margin: 0; letter-spacing: 0.3px; }
+    .sub { color: var(--muted); font-size: 0.82rem; margin-top: 4px; }
+
+    .status {
+      display: inline-flex; align-items: center; gap: 8px; margin: 14px 0 4px;
+      background: var(--card); border: 1px solid var(--border);
+      padding: 7px 14px; border-radius: 999px; font-size: 0.82rem;
+    }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: #555; }
+    .dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+    .dot.err { background: #ff5470; box-shadow: 0 0 8px #ff5470; }
+
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 20px;
+      padding: 22px; text-align: center; width: 100%; max-width: 360px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.45); margin-top: 14px;
+    }
+    .qr {
+      width: 224px; height: 224px; border-radius: 14px; background: #fff;
+      padding: 8px; margin: 6px auto 14px; display: block;
+    }
+    .hint { color: var(--muted); font-size: 0.82rem; margin: 0 0 14px; }
+    .url {
+      display: block; font-family: ui-monospace, monospace; font-size: 0.72rem;
+      color: var(--accent); background: #1e1e2b; padding: 9px 11px;
+      border-radius: 9px; word-break: break-all; text-decoration: none;
+      border: 1px solid transparent; cursor: pointer;
+    }
+    .url:hover { border-color: var(--accent); }
+
+    .meta {
+      display: flex; justify-content: center; gap: 18px; margin-top: 14px;
+      color: var(--muted); font-size: 0.78rem;
+    }
+    .meta b { color: var(--text); font-weight: 600; }
+
+    .actions { display: flex; gap: 10px; margin-top: 16px; width: 100%; max-width: 360px; }
+    button {
+      flex: 1; background: var(--accent-soft); color: var(--accent);
+      border: 1px solid var(--accent); border-radius: 11px; padding: 10px;
+      font-size: 0.85rem; cursor: pointer; font-weight: 600;
+    }
+    button:hover { background: var(--accent); color: #fff; }
+
+    .toggle {
+      display: flex; align-items: center; gap: 10px; margin-top: 18px;
+      color: var(--muted); font-size: 0.83rem; cursor: pointer; user-select: none;
+    }
+    .toggle input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+
+    .footer { color: var(--muted); font-size: 0.72rem; margin-top: 20px; text-align: center; max-width: 360px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🌐 Nexus Remote All</h1>
+    <div class="sub">Télécommande universelle pour votre PC</div>
+  </header>
+
+  <div class="status">
+    <span class="dot" id="dot"></span>
+    <span id="statusText">Démarrage de l'agent…</span>
+  </div>
+
+  <div class="card">
+    <img class="qr" id="qr" alt="QR Code d'appairage" />
+    <p class="hint">Scannez ce QR Code avec l'appareil photo de votre smartphone (même Wi-Fi).</p>
+    <a class="url" id="url" title="Ouvrir dans le navigateur">…</a>
+    <div class="meta">
+      <span>IP&nbsp;: <b id="ip">—</b></span>
+      <span>Port&nbsp;: <b id="port">—</b></span>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button id="refresh">🔄 Nouveau QR</button>
+    <button id="open">🖥️ Page LAN</button>
+  </div>
+
+  <label class="toggle">
+    <input type="checkbox" id="autolaunch" />
+    Démarrer automatiquement au lancement de Windows
+  </label>
+
+  <p class="footer">
+    Gardez cette application ouverte tant que vous utilisez la télécommande.
+    Elle reste active dans la barre système lorsque vous fermez la fenêtre.
+  </p>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function setStatus(state, text) {
+      const dot = $("dot");
+      dot.className = "dot" + (state === "on" ? " on" : state === "err" ? " err" : "");
+      $("statusText").textContent = text;
+    }
+
+    function render(status) {
+      if (!status || !status.ok) {
+        setStatus("err", "Agent indisponible — redémarrez l'application.");
+        return;
+      }
+      setStatus("on", "Agent actif — prêt à l'appairage");
+      $("ip").textContent = status.ip;
+      $("port").textContent = status.httpPort;
+      if (status.pairing) {
+        $("qr").src = status.pairing.qrDataUrl;
+        $("url").textContent = status.pairing.url;
+        $("url").dataset.url = status.pairing.url;
+      }
+    }
+
+    async function load() {
+      try {
+        render(await window.nexus.getStatus());
+        $("autolaunch").checked = await window.nexus.getAutoLaunch();
+      } catch (e) {
+        setStatus("err", "Erreur : " + e);
+      }
+    }
+
+    $("refresh").addEventListener("click", async () => {
+      const res = await window.nexus.refreshPairing();
+      if (res && res.ok && res.pairing) {
+        $("qr").src = res.pairing.qrDataUrl;
+        $("url").textContent = res.pairing.url;
+        $("url").dataset.url = res.pairing.url;
+      }
+    });
+
+    $("open").addEventListener("click", async () => {
+      const s = await window.nexus.getStatus();
+      if (s && s.pairingDisplayUrl) window.nexus.openExternal(s.pairingDisplayUrl);
+    });
+
+    $("url").addEventListener("click", () => {
+      const u = $("url").dataset.url;
+      if (u) window.nexus.openExternal(u);
+    });
+
+    $("autolaunch").addEventListener("change", async (e) => {
+      const val = await window.nexus.setAutoLaunch(e.target.checked);
+      e.target.checked = val;
+    });
+
+    load();
+  </script>
+</body>
+</html>
