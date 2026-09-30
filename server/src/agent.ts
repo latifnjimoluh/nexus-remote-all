@@ -91,8 +91,11 @@ export async function startAgent(options: AgentOptions = {}): Promise<AgentHandl
 
   app.use("/pair", pairingRouter);
 
-  app.listen(CONFIG.HTTP_PORT, () => {
+  const httpServer = app.listen(CONFIG.HTTP_PORT, () => {
     say(`HTTP  → http://0.0.0.0:${CONFIG.HTTP_PORT}`);
+  });
+  httpServer.on("error", (err) => {
+    console.error("[Serveur HTTP] Erreur :", err.message);
   });
 
   // ───────────────────────────────────────────────────────────
@@ -125,6 +128,10 @@ export async function startAgent(options: AgentOptions = {}): Promise<AgentHandl
       }
       callback(true);
     },
+  });
+
+  wss.on("error", (err) => {
+    console.error("[Serveur WSS] Erreur :", err.message);
   });
 
   wss.on("connection", (ws) => {
