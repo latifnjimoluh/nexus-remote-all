@@ -57,6 +57,14 @@ server.on("upgrade", (req, socket, head) => {
 });
 
 wss.on("connection", (ws: WebSocket, req) => {
+  (ws as any).isAlive = true;
+  ws.on("pong", () => {
+    (ws as any).isAlive = true;
+  });
+  ws.on("error", (err) => {
+    console.warn("[RELAY] Erreur socket :", err.message);
+  });
+
   const url = new URL(req.url ?? "", "http://x");
   const role = url.searchParams.get("role");
   const codeParam = url.searchParams.get("code")?.replace(/\D/g, ""); // normalise chiffres
@@ -156,6 +164,21 @@ wss.on("connection", (ws: WebSocket, req) => {
   // Rôle inconnu
   ws.close(4000, "invalid_role");
 });
+
+// Heartbeat sweep toutes les 30s pour purger les connexions interrompues brutalement
+setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if ((ws as any).isAlive === false) {
+      return ws.terminate();
+    }
+    (ws as any).isAlive = false;
+    try {
+      ws.ping();
+    } catch {
+      ws.terminate();
+    }
+  });
+}, 30000);
 
 // Nettoyage régulier des sessions orphelines (> 24h)
 setInterval(() => {

@@ -12,6 +12,14 @@ import { publishService } from "./discovery/mdns.js";
 import { startRelayClient } from "./relay-client.js";
 import type { Command, ServerMessage } from "../../shared/protocol.js";
 
+// Protection contre les interruptions intempestives
+process.on("uncaughtException", (err) => {
+  console.error("[Serveur] Exception non interceptée :", err?.message ?? err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[Serveur] Rejet de promesse non géré :", reason);
+});
+
 /** Retourne la première IPv4 non-interne (adresse LAN de l'hôte). */
 function getLocalIp(): string {
   for (const iface of Object.values(networkInterfaces())) {

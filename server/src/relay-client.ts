@@ -16,16 +16,49 @@ export function startRelayClient(): void {
 
   let ws: WebSocket | null = null;
   let reconnectTimer: NodeJS.Timeout | null = null;
+  let heartbeatTimer: NodeJS.Timeout | null = null;
+
+  function stopHeartbeat() {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+  }
+
+  function startHeartbeat(socket: WebSocket) {
+    stopHeartbeat();
+    heartbeatTimer = setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) {
+        try {
+          socket.ping();
+        } catch {
+          // Socket fermé
+        }
+      }
+    }, 20000); // Heartbeat toutes les 20s pour maintenir le tunnel Cloudflare
+  }
 
   function connect() {
-    try {
-      ws = new WebSocket(url);
+    // Nettoyer l'ancienne instance de socket si existante
+    if (ws) {
+      try {
+        ws.removeAllListeners();
+        ws.terminate();
+      } catch {}
+      ws = null;
+    }
+    stopHeartbeat();
 
-      ws.on("open", () => {
+    try {
+      const socket = new WebSocket(url);
+      ws = socket;
+
+      socket.on("open", () => {
         console.log("☁️  Liaison Cloud établie avec remote.unlineservice.com ✔");
+        startHeartbeat(socket);
       });
 
-      ws.on("message", async (raw) => {
+      socket.on("message", async (raw) => {
         try {
           const data = JSON.parse(raw.toString());
 
@@ -64,12 +97,12 @@ export function startRelayClient(): void {
           const cmd = data as Command;
           try {
             await handleCommand(cmd);
-            if (ws && ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ type: "ack", cmd: cmd.type } satisfies ServerMessage));
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({ type: "ack", cmd: cmd.type } satisfies ServerMessage));
             }
           } catch (err) {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-              ws.send(
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.send(
                 JSON.stringify({
                   type: "error",
                   cmd: cmd.type,
@@ -83,21 +116,28 @@ export function startRelayClient(): void {
         }
       });
 
-      ws.on("close", () => {
+      socket.on("close", () => {
+        stopHeartbeat();
         scheduleReconnect();
       });
 
-      ws.on("error", () => {
+      socket.on("error", (err) => {
+        console.warn("[Cloud Relay] Alerte réseau :", err.message);
+        stopHeartbeat();
         scheduleReconnect();
       });
-    } catch {
+    } catch (e) {
+      console.warn("[Cloud Relay] Erreur d'initialisation :", e);
       scheduleReconnect();
     }
   }
 
   function scheduleReconnect() {
-    if (reconnectTimer) clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(connect, 4000);
+    if (reconnectTimer) return; // Un seul timer en attente à la fois
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connect();
+    }, 4000);
   }
 
   connect();
