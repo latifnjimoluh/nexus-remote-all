@@ -1,0 +1,212 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   Thème Nexus Dark Glassmorphism (Tailwind v4 via @theme)
+   ========================================================================== */
+@theme {
+  --color-nexus-bg: #09090f;
+  --color-nexus-surface: #0f0f18;
+  --color-nexus-panel: #131320;
+  --color-nexus-panel2: #1b1b2d;
+  --color-nexus-card: rgba(22, 22, 34, 0.75);
+  --color-nexus-border: rgba(255, 255, 255, 0.08);
+  --color-nexus-border-glow: rgba(109, 94, 252, 0.35);
+  --color-nexus-accent: #6d5efc;
+  --color-nexus-accent-hover: #7d70ff;
+  --color-nexus-accent-dark: #4b3ec4;
+  --color-nexus-muted: #8b8b9f;
+  --color-nexus-text: #f1f2f8;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background-color: var(--color-nexus-bg);
+}
+
+body {
+  color: var(--color-nexus-text);
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(109, 94, 252, 0.12) 0%, transparent 60%),
+    radial-gradient(circle at 100% 100%, rgba(59, 130, 246, 0.08) 0%, transparent 50%),
+    var(--color-nexus-bg);
+  background-attachment: fixed;
+}
+
+/* ==========================================================================
+   Composants & Classes Utilitaires Glassmorphism
+   ========================================================================== */
+
+/* Panneau verre translucide avec flou et fine bordure lumineuse */
+.glass-panel {
+  background: rgba(18, 18, 28, 0.72);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+.glass-panel-elevated {
+  background: rgba(26, 26, 40, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+/* Bouton interactif standard avec effet tactile haptique et visuel */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, rgba(29, 29, 44, 0.85) 0%, rgba(20, 20, 32, 0.95) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1rem;
+  padding: 0.875rem 1rem;
+  color: #f1f2f8;
+  font-weight: 500;
+  text-align: center;
+  transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.15s ease,
+              background-color 0.15s ease,
+              border-color 0.15s ease,
+              filter 0.1s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  user-select: none;
+  cursor: pointer;
+  outline: none;
+}
+
+.btn:active {
+  transform: scale(0.95);
+  filter: brightness(1.25);
+  border-color: rgba(109, 94, 252, 0.5);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4), inset 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* Bouton d'accentuation haute visibilité */
+.btn-accent {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #7b6dff 0%, #6d5efc 60%, #5746f0 100%);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 1rem;
+  padding: 0.875rem 1rem;
+  color: #ffffff;
+  font-weight: 600;
+  text-align: center;
+  box-shadow: 0 6px 20px rgba(109, 94, 252, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  transition: transform 0.1s ease, filter 0.1s ease, box-shadow 0.15s ease;
+  user-select: none;
+  cursor: pointer;
+}
+
+.btn-accent:active {
+  transform: scale(0.95);
+  filter: brightness(1.15);
+  box-shadow: 0 2px 8px rgba(109, 94, 252, 0.5);
+}
+
+/* Bouton Pill Neumorphique compact */
+.btn-pill {
+  border-radius: 9999px;
+  padding: 0.5rem 1rem;
+  background: rgba(28, 28, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.15s ease;
+}
+
+.btn-pill:active {
+  transform: scale(0.94);
+  background: rgba(109, 94, 252, 0.25);
+  border-color: #6d5efc;
+}
+
+/* Tuile Stream Deck */
+.streamdeck-tile {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1.25rem;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.streamdeck-tile:active {
+  transform: scale(0.93);
+  filter: brightness(1.3);
+  box-shadow: 0 0 24px currentColor;
+}
+
+/* Anneau D-Pad circulaire pour télécommande TV */
+.dpad-container {
+  width: 250px;
+  height: 250px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #1a1a2a 0%, #12121e 100%);
+  border: 2px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5), inset 0 2px 4px rgba(255, 255, 255, 0.08);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Safe area padding pour iPhone & Android à encoche */
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 12px);
+}
+
+.pt-safe {
+  padding-top: max(env(safe-area-inset-top, 0px), 8px);
+}
+
+/* Effets d'apparition animés */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes toastSlideUp {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 20px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.animate-toast {
+  animation: toastSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Cache la barre de défilement tout en autorisant le scroll */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
