@@ -1,7 +1,8 @@
 import { WebSocket } from "ws";
 import qrcodeTerminal from "qrcode-terminal";
 import { handleCommand } from "./ws/router.js";
-import type { Command, ServerMessage } from "../../shared/protocol.js";
+import { generateKeyB64url, keyFromB64url, encrypt, decrypt, isEnvelope } from "./e2e.js";
+import type { ServerMessage } from "../../shared/protocol.js";
 
 const CLOUD_RELAY_URL = process.env.NEXUS_RELAY_URL ?? "wss://remote.unlineservice.com/relay";
 
@@ -17,6 +18,7 @@ export function startRelayClient(): void {
   let ws: WebSocket | null = null;
   let reconnectTimer: NodeJS.Timeout | null = null;
   let heartbeatTimer: NodeJS.Timeout | null = null;
+  let sessionKey: Buffer | null = null; // clé E2E (F5) de la session cloud courante
 
   function stopHeartbeat() {
     if (heartbeatTimer) {
@@ -66,16 +68,22 @@ export function startRelayClient(): void {
           if (data.type === "relay:ready") {
             const code = String(data.code);
             const formatted = `${code.slice(0, 3)} ${code.slice(3)}`;
+            // F5 — clé E2E générée localement, placée dans le FRAGMENT d'URL (#k=)
+            // qui n'est jamais transmis au serveur web : le relais ne la voit pas.
+            const keyB64url = generateKeyB64url();
+            sessionKey = keyFromB64url(keyB64url);
+            const sep = String(data.url).includes("#") ? "&" : "#";
+            const secureUrl = `${data.url}${sep}k=${keyB64url}`;
             console.log("\n" + "═".repeat(60));
-            console.log("  🚀 VOTRE PC EST CONTRÔLABLE DEPUIS LE CLOUD !");
+            console.log("  🚀 VOTRE PC EST CONTRÔLABLE DEPUIS LE CLOUD (chiffré E2E) !");
             console.log("═".repeat(60));
             console.log(`  🔑 CODE PIN DE CONNEXION  :   \x1b[1;32m${formatted}\x1b[0m`);
             console.log(`  🌐 SITE WEB DU CONTRÔLEUR :   https://remote.unlineservice.com`);
-            console.log(`  🔗 LIEN DIRECT SMARTPHONE :   ${data.url}`);
+            console.log(`  🔗 LIEN DIRECT SMARTPHONE :   ${secureUrl}`);
             console.log("═".repeat(60));
-            console.log("\n📱 Scannez ce QR Code avec votre téléphone pour vous connecter :");
+            console.log("\n📱 Scannez ce QR Code avec votre téléphone (il contient la clé de chiffrement) :");
             try {
-              qrcodeTerminal.generate(data.url, { small: true });
+              qrcodeTerminal.generate(secureUrl, { small: true });
             } catch {
               // Si la console ne supporte pas le rendu ANSI
             }
@@ -93,22 +101,27 @@ export function startRelayClient(): void {
             return;
           }
 
-          // 2. Commandes temps réel reçues depuis le téléphone
-          const cmd = data as Command;
+          // 2. Commande CHIFFRÉE E2E (F5) reçue depuis le téléphone via le relais.
+          //    Le relais ne transporte que des enveloppes opaques {n,d} : il ne
+          //    peut ni lire ni forger de commandes. On rejette tout ce qui n'est
+          //    pas une enveloppe valide (plus de commandes en clair via le cloud).
+          if (!isEnvelope(data) || !sessionKey) return;
+          let cmdType: ServerMessage["cmd"] = undefined;
           try {
-            await handleCommand(cmd);
+            const parsed = JSON.parse(decrypt(sessionKey, data)) as { type?: ServerMessage["cmd"] };
+            cmdType = parsed.type;
+            await handleCommand(parsed);
             if (socket.readyState === WebSocket.OPEN) {
-              socket.send(JSON.stringify({ type: "ack", cmd: cmd.type } satisfies ServerMessage));
+              const ack = encrypt(sessionKey, JSON.stringify({ type: "ack", cmd: cmdType } satisfies ServerMessage));
+              socket.send(JSON.stringify(ack));
             }
           } catch (err) {
-            if (socket.readyState === WebSocket.OPEN) {
-              socket.send(
-                JSON.stringify({
-                  type: "error",
-                  cmd: cmd.type,
-                  payload: String(err),
-                } satisfies ServerMessage),
+            if (socket.readyState === WebSocket.OPEN && sessionKey) {
+              const env = encrypt(
+                sessionKey,
+                JSON.stringify({ type: "error", cmd: cmdType, payload: String(err) } satisfies ServerMessage),
               );
+              socket.send(JSON.stringify(env));
             }
           }
         } catch {

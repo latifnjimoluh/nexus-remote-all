@@ -23,8 +23,13 @@ function readConfig(): ConnectionConfig | null {
   // Priorité 1 : Code PIN Cloud (mode AnyDesk)
   if (code && code.replace(/\D/g, "").length === 6) {
     const cleanCode = code.replace(/\D/g, "");
+    // F5 — clé E2E lue dans le FRAGMENT d'URL (#k=...), jamais envoyé au serveur,
+    // ou depuis le cache local pour une reconnexion.
+    const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
+    const key = hashParams.get("k") ?? localStorage.getItem("nexus.key") ?? undefined;
     localStorage.setItem("nexus.code", cleanCode);
-    return { mode: "cloud", code: cleanCode };
+    if (key) localStorage.setItem("nexus.key", key);
+    return { mode: "cloud", code: cleanCode, key };
   }
 
   // Priorité 2 : Mode Local direct par IP
