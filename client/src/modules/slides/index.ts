@@ -14,12 +14,27 @@ function formatTime(totalSeconds: number): string {
 
 export function renderSlides(root: HTMLElement): void {
   const wrap = document.createElement("div");
-  wrap.className = "flex flex-col gap-4 max-w-md mx-auto h-full justify-between pb-2 select-none";
+  wrap.className = "flex flex-col gap-3 max-w-md mx-auto h-full justify-between pb-2 select-none";
+
+  // En-tête explicatif du mode Présentation
+  const infoBanner = document.createElement("div");
+  infoBanner.className =
+    "glass-panel rounded-2xl px-3 py-2 border border-white/10 flex items-center justify-between text-xs";
+  infoBanner.innerHTML = `
+    <div class="flex items-center gap-2">
+      <span class="text-base">📊</span>
+      <div class="flex flex-col">
+        <span class="font-bold text-slate-200 text-[11px]">Télécommande Présentation</span>
+        <span class="text-[10px] text-nexus-muted">Pour PowerPoint, Google Slides, Keynote, PDF</span>
+      </div>
+    </div>
+    <span class="px-2 py-0.5 rounded-full bg-nexus-accent/20 border border-nexus-accent/40 text-nexus-accent font-semibold text-[10px]">Diapo</span>
+  `;
 
   // 1. Chronomètre Orateur Numérique (Style LED / Scène)
   const timerCard = document.createElement("div");
   timerCard.className =
-    "glass-panel-elevated rounded-3xl p-4 flex flex-col items-center justify-center gap-2 border border-white/10 shadow-[0_8px_30px_rgba(0,0,0,0.5)]";
+    "glass-panel-elevated rounded-3xl p-3 flex flex-col items-center justify-center gap-2 border border-white/10 shadow-[0_8px_30px_rgba(0,0,0,0.5)]";
 
   const timerHeader = document.createElement("div");
   timerHeader.className = "flex items-center justify-between w-full px-2";
@@ -28,7 +43,7 @@ export function renderSlides(root: HTMLElement): void {
   timerTitle.className = "flex items-center gap-2";
   timerTitle.innerHTML = `
     <span class="text-sm">⏱️</span>
-    <span class="text-[11px] font-bold uppercase text-nexus-muted tracking-wider">Chronomètre de Présentation</span>
+    <span class="text-[11px] font-bold uppercase text-nexus-muted tracking-wider">Chronomètre Exposé</span>
   `;
 
   const statusBadge = document.createElement("span");

@@ -26,6 +26,10 @@ export function onError(cb: (msg: string) => void): void {
   errorCb = cb;
 }
 
+export function isReconnecting(): boolean {
+  return shouldReconnect;
+}
+
 /** Ouvre la connexion (mode Cloud avec code PIN, ou mode Local avec IP). */
 export function connect(config: ConnectionConfig): void {
   currentConfig = config;
@@ -63,6 +67,23 @@ function getSocketUrl(cfg: ConnectionConfig): string {
   }
 }
 
+function getDeviceDetails(): { name: string; device: string } {
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  let dev = "Smartphone Mobile";
+  if (/iPad/i.test(ua)) dev = "iPad (Safari)";
+  else if (/iPhone/i.test(ua)) dev = "iPhone (Safari)";
+  else if (/Android/i.test(ua)) {
+    dev = /Mobile/i.test(ua) ? "Smartphone Android" : "Tablette Android";
+  } else if (/Macintosh/i.test(ua)) dev = "Mac";
+  else if (/Windows/i.test(ua)) dev = "PC Windows";
+
+  const customName = typeof localStorage !== "undefined" ? localStorage.getItem("nexus.deviceName") : null;
+  return {
+    name: customName || dev,
+    device: dev,
+  };
+}
+
 function open(): void {
   if (!currentConfig) return;
 
@@ -74,6 +95,10 @@ function open(): void {
 
     socket.onopen = () => {
       statusCb("open");
+      try {
+        const details = getDeviceDetails();
+        socket?.send(JSON.stringify({ type: "client:hello", ...details }));
+      } catch {}
       flush();
     };
 
@@ -82,16 +107,35 @@ function open(): void {
         const data = JSON.parse(e.data);
         if (data.type === "relay:error") {
           errorCb(data.message || "Erreur de relais");
+        } else if (data.type === "error" && typeof data.payload === "string") {
+          if (data.payload.includes("déconnecté par l'ordinateur hôte") || data.payload.includes("Token révoqué")) {
+            shouldReconnect = false;
+            try {
+              localStorage.removeItem("nexus.token");
+              localStorage.removeItem("nexus.code");
+              if (typeof history !== "undefined" && history.replaceState) {
+                history.replaceState(null, "", location.pathname);
+              }
+            } catch {}
+            errorCb(data.payload);
+          }
         }
       } catch {}
     };
 
     socket.onclose = (e) => {
       statusCb("closed");
-      if (e.code === 4004) {
-        // Code PIN invalide ou PC déconnecté : ne pas reconnecter en boucle
-        errorCb("Code invalide ou ordinateur hôte déconnecté.");
+      if (e.code === 4004 || e.code === 4008 || e.code === 4003 || e.code === 4001 || e.code === 1008) {
+        // Déconnecté par l'hôte ou code invalide : stopper immédiatement la reconnexion automatique
         shouldReconnect = false;
+        try {
+          localStorage.removeItem("nexus.token");
+          localStorage.removeItem("nexus.code");
+          if (typeof history !== "undefined" && history.replaceState) {
+            history.replaceState(null, "", location.pathname);
+          }
+        } catch {}
+        errorCb("Vous avez été déconnecté par l'ordinateur hôte.");
         return;
       }
       if (shouldReconnect) setTimeout(open, 1500);

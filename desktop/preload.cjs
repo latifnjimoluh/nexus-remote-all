@@ -7,4 +7,11 @@ contextBridge.exposeInMainWorld("nexus", {
   getAutoLaunch: () => ipcRenderer.invoke("nexus:get-autolaunch"),
   setAutoLaunch: (enabled) => ipcRenderer.invoke("nexus:set-autolaunch", enabled),
   openExternal: (url) => ipcRenderer.invoke("nexus:open-external", url),
+  onStatusUpdated: (callback) => {
+    ipcRenderer.on("nexus:status-updated", (_e, data) => callback(data));
+  },
+  onClientsUpdated: (callback) => {
+    ipcRenderer.on("nexus:clients-updated", (_e, data) => callback(data));
+  },
+  disconnectClient: (id) => ipcRenderer.invoke("nexus:disconnect-client", id),
 });

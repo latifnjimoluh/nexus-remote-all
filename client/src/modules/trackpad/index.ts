@@ -15,7 +15,7 @@ export function renderTrackpad(root: HTMLElement): void {
   hints.className = "flex items-center gap-1.5";
   hints.innerHTML = `
     <span class="inline-block w-2 h-2 rounded-full bg-nexus-accent animate-pulse"></span>
-    <span class="text-[11px] font-medium text-slate-300">Trackpad Tactile</span>
+    <span class="text-[11px] font-medium text-slate-300">Trackpad Tactile Précision</span>
   `;
 
   const sensBadge = document.createElement("button");
@@ -36,7 +36,7 @@ export function renderTrackpad(root: HTMLElement): void {
   padContainer.className =
     "relative flex-1 rounded-3xl glass-panel border border-white/10 flex flex-col items-center justify-center overflow-hidden touch-none select-none shadow-[inset_0_2px_8px_rgba(0,0,0,0.4)]";
 
-  // Repère visuel central et texture de fond
+  // Repère visuel central et gestes tactiles
   const centerGuide = document.createElement("div");
   centerGuide.className =
     "flex flex-col items-center justify-center gap-2 pointer-events-none opacity-40 select-none text-center px-4";
@@ -45,10 +45,11 @@ export function renderTrackpad(root: HTMLElement): void {
       <span class="text-2xl opacity-60">👆</span>
     </div>
     <p class="text-xs font-medium text-slate-300 tracking-wide">Zone tactile haute précision</p>
-    <div class="flex items-center gap-3 text-[10px] text-nexus-muted">
+    <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] text-nexus-muted mt-1">
       <span>• 1 doigt = Curseur</span>
-      <span>• Tap = Clic G</span>
+      <span>• Tap 1 doigt = Clic Gauche</span>
       <span>• 2 doigts = Défilement</span>
+      <span>• Tap 2 doigts = Clic Droit</span>
     </div>
   `;
 
@@ -59,23 +60,46 @@ export function renderTrackpad(root: HTMLElement): void {
 
   padContainer.append(centerGuide, pointerPill);
 
-  let last: { x: number; y: number } | null = null;
+  // État du trackpad tactile multi-touch
+  let lastSingle: { x: number; y: number } | null = null;
+  let lastMid: { x: number; y: number } | null = null;
+  let maxTouchCount = 0;
   let moved = false;
   let startTime = 0;
+  let scrollAccumY = 0;
+  let scrollAccumX = 0;
 
   padContainer.addEventListener(
     "touchstart",
     (e) => {
-      const t = e.touches[0];
-      const rect = padContainer.getBoundingClientRect();
-      last = { x: t.clientX, y: t.clientY };
-      moved = false;
+      const count = e.touches.length;
+      maxTouchCount = Math.max(maxTouchCount, count);
       startTime = Date.now();
+      const rect = padContainer.getBoundingClientRect();
 
-      // Placer l'indicateur visuel
-      pointerPill.style.left = `${t.clientX - rect.left}px`;
-      pointerPill.style.top = `${t.clientY - rect.top}px`;
-      pointerPill.style.opacity = "1";
+      if (count === 1) {
+        const t = e.touches[0];
+        lastSingle = { x: t.clientX, y: t.clientY };
+        lastMid = null;
+
+        pointerPill.style.left = `${t.clientX - rect.left}px`;
+        pointerPill.style.top = `${t.clientY - rect.top}px`;
+        pointerPill.style.opacity = "1";
+      } else if (count >= 2) {
+        const t0 = e.touches[0];
+        const t1 = e.touches[1];
+        lastMid = {
+          x: (t0.clientX + t1.clientX) / 2,
+          y: (t0.clientY + t1.clientY) / 2,
+        };
+        lastSingle = null;
+        scrollAccumY = 0;
+        scrollAccumX = 0;
+
+        pointerPill.style.left = `${lastMid.x - rect.left}px`;
+        pointerPill.style.top = `${lastMid.y - rect.top}px`;
+        pointerPill.style.opacity = "1";
+      }
     },
     { passive: true },
   );
@@ -83,49 +107,123 @@ export function renderTrackpad(root: HTMLElement): void {
   padContainer.addEventListener(
     "touchmove",
     (e) => {
-      if (!last) return;
-      const t = e.touches[0];
+      if (e.cancelable) e.preventDefault();
+      const count = e.touches.length;
+      maxTouchCount = Math.max(maxTouchCount, count);
       const rect = padContainer.getBoundingClientRect();
-      const dx = t.clientX - last.x;
-      const dy = t.clientY - last.y;
 
-      pointerPill.style.left = `${t.clientX - rect.left}px`;
-      pointerPill.style.top = `${t.clientY - rect.top}px`;
+      if (count >= 2) {
+        // ── DÉFILEMENT À 2 DOIGTS (SCROLL MOLETTE) ──
+        const t0 = e.touches[0];
+        const t1 = e.touches[1];
+        const midX = (t0.clientX + t1.clientX) / 2;
+        const midY = (t0.clientY + t1.clientY) / 2;
 
-      const currentSensitivity = getTrackpadSensitivity();
+        pointerPill.style.left = `${midX - rect.left}px`;
+        pointerPill.style.top = `${midY - rect.top}px`;
 
-      if (e.touches.length >= 2) {
-        // Deux doigts = défilement / molette fluide
-        send({
-          type: "mouse:scroll",
-          dx: Math.round(dx / 4),
-          dy: Math.round(dy / 2.5),
-        });
-      } else {
-        // Un doigt = déplacement du curseur
-        send({
-          type: "mouse:move",
-          dx: Math.round(dx * currentSensitivity),
-          dy: Math.round(dy * currentSensitivity),
-        });
+        if (lastMid) {
+          const dx = midX - lastMid.x;
+          const dy = midY - lastMid.y;
+
+          if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+            moved = true;
+          }
+
+          scrollAccumY += dy;
+          scrollAccumX += dx;
+
+          // Seuil de défilement (pixels par cran de molette PC)
+          const SCROLL_THRESHOLD = 7;
+
+          if (Math.abs(scrollAccumY) >= SCROLL_THRESHOLD) {
+            const steps = Math.trunc(scrollAccumY / SCROLL_THRESHOLD);
+            scrollAccumY -= steps * SCROLL_THRESHOLD;
+
+            // Défilement naturel : glisser vers le haut (dy négatif) fait défiler la page vers le bas (steps positif)
+            send({
+              type: "mouse:scroll",
+              dx: 0,
+              dy: -steps,
+            });
+          }
+
+          if (Math.abs(scrollAccumX) >= SCROLL_THRESHOLD * 2) {
+            const stepsX = Math.trunc(scrollAccumX / (SCROLL_THRESHOLD * 2));
+            scrollAccumX -= stepsX * (SCROLL_THRESHOLD * 2);
+            send({
+              type: "mouse:scroll",
+              dx: stepsX,
+              dy: 0,
+            });
+          }
+        }
+
+        lastMid = { x: midX, y: midY };
+      } else if (count === 1) {
+        // ── DÉPLACEMENT DU CURSEUR À 1 DOIGT ──
+        const t = e.touches[0];
+        pointerPill.style.left = `${t.clientX - rect.left}px`;
+        pointerPill.style.top = `${t.clientY - rect.top}px`;
+
+        if (lastSingle) {
+          const dx = t.clientX - lastSingle.x;
+          const dy = t.clientY - lastSingle.y;
+
+          if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+            moved = true;
+          }
+
+          const currentSensitivity = getTrackpadSensitivity();
+          send({
+            type: "mouse:move",
+            dx: Math.round(dx * currentSensitivity),
+            dy: Math.round(dy * currentSensitivity),
+          });
+        }
+
+        lastSingle = { x: t.clientX, y: t.clientY };
       }
-
-      last = { x: t.clientX, y: t.clientY };
-      moved = true;
     },
-    { passive: true },
+    { passive: false },
   );
 
-  padContainer.addEventListener("touchend", () => {
-    pointerPill.style.opacity = "0";
+  const handleTouchEnd = (e: TouchEvent) => {
+    if (e.touches.length === 0) {
+      pointerPill.style.opacity = "0";
+      const duration = Date.now() - startTime;
 
-    // Tap rapide sans mouvement = Clic gauche
-    if (!moved && Date.now() - startTime < 220) {
-      tapFeedback(15, 1300);
-      send({ type: "mouse:click", button: "left" });
+      // Tap court sans mouvement
+      if (!moved && duration < 260) {
+        if (maxTouchCount >= 2) {
+          // Tap à 2 doigts = Clic Droit
+          tapFeedback(20, 1100);
+          send({ type: "mouse:click", button: "right" });
+        } else {
+          // Tap à 1 doigt = Clic Gauche
+          tapFeedback(15, 1300);
+          send({ type: "mouse:click", button: "left" });
+        }
+      }
+
+      lastSingle = null;
+      lastMid = null;
+      maxTouchCount = 0;
+      moved = false;
+      scrollAccumY = 0;
+      scrollAccumX = 0;
+    } else if (e.touches.length === 1) {
+      // Transition propre : un doigt restant ne fait pas sauter le curseur
+      const t = e.touches[0];
+      lastSingle = { x: t.clientX, y: t.clientY };
+      lastMid = null;
+      scrollAccumY = 0;
+      scrollAccumX = 0;
     }
-    last = null;
-  });
+  };
+
+  padContainer.addEventListener("touchend", handleTouchEnd);
+  padContainer.addEventListener("touchcancel", handleTouchEnd);
 
   // Barre inférieure avec boutons physiques virtuels
   const buttonRow = document.createElement("div");

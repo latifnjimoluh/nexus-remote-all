@@ -70,6 +70,13 @@ export function validateCommand(raw: unknown): Command | null {
     case "slide:black":
       return { type: c.type } as Command;
 
+    case "client:hello":
+      return {
+        type: "client:hello",
+        name: isStr(c.name) ? c.name.slice(0, 60) : undefined,
+        device: isStr(c.device) ? c.device.slice(0, 60) : undefined,
+      };
+
     default:
       return null;
   }

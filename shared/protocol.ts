@@ -26,7 +26,9 @@ export type Command =
   | { type: "slide:prev" }
   | { type: "slide:start" }
   | { type: "slide:end" }
-  | { type: "slide:black" };
+  | { type: "slide:black" }
+  // --- Handshake & Identification du client ---
+  | { type: "client:hello"; name?: string; device?: string };
 
 export type MouseButton = "left" | "right" | "middle";
 

@@ -7,150 +7,1043 @@
   <title>Nexus Remote All</title>
   <style>
     :root {
-      --bg: #0a0a0f; --card: #15151f; --border: #1e1e2b; --muted: #8a8a9a;
-      --accent: #6d5efc; --accent-soft: #6d5efc22; --ok: #3ddc84; --text: #ffffff;
+      --bg: #090a10;
+      --card-bg: #121420;
+      --card-border: #1e2238;
+      --card-hover: #171a2c;
+      --accent: #6366f1;
+      --accent-light: #818cf8;
+      --accent-soft: rgba(99, 102, 241, 0.12);
+      --ok: #10b981;
+      --ok-soft: rgba(16, 185, 129, 0.12);
+      --err: #f43f5e;
+      --warn: #f59e0b;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --radius: 16px;
     }
-    * { box-sizing: border-box; }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
-      margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
-      font-family: system-ui, "Segoe UI", sans-serif; display: flex;
-      flex-direction: column; align-items: center; padding: 24px 18px 28px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+      overflow-x: hidden;
+      overflow-y: auto;
     }
-    header { text-align: center; margin-bottom: 4px; }
-    h1 { font-size: 1.35rem; margin: 0; letter-spacing: 0.3px; }
-    .sub { color: var(--muted); font-size: 0.82rem; margin-top: 4px; }
 
-    .status {
-      display: inline-flex; align-items: center; gap: 8px; margin: 14px 0 4px;
-      background: var(--card); border: 1px solid var(--border);
-      padding: 7px 14px; border-radius: 999px; font-size: 0.82rem;
+    /* Scrollbar discrète */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #1f2438; border-radius: 999px; }
+
+    /* En-tête principal */
+    header {
+      background: rgba(18, 20, 32, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--card-border);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
     }
-    .dot { width: 9px; height: 9px; border-radius: 50%; background: #555; }
-    .dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
-    .dot.err { background: #ff5470; box-shadow: 0 0 8px #ff5470; }
 
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-icon {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, #6366f1, #a855f7);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.15rem;
+      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
+    }
+
+    .brand-info h1 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .version-tag {
+      font-size: 0.65rem;
+      background: var(--card-border);
+      color: var(--text-muted);
+      padding: 2px 7px;
+      border-radius: 6px;
+      font-weight: 600;
+    }
+
+    .brand-info p {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-top: 1px;
+    }
+
+    .header-status {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #0d0e17;
+      border: 1px solid var(--card-border);
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 0.76rem;
+      font-weight: 500;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #64748b;
+      transition: all 0.3s;
+    }
+    .dot.on { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+    .dot.wait { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+    .dot.err { background: var(--err); box-shadow: 0 0 10px var(--err); }
+
+    .net-pill {
+      font-size: 0.74rem;
+      color: var(--text-muted);
+      background: #0d0e17;
+      border: 1px solid var(--card-border);
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-family: ui-monospace, monospace;
+    }
+    .net-pill b { color: var(--text); }
+
+    /* Layout principal à 2 colonnes */
+    main {
+      flex: 1;
+      padding: 20px 24px;
+      max-width: 880px;
+      width: 100%;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 310px 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+
+    /* Cartes */
     .card {
-      background: var(--card); border: 1px solid var(--border); border-radius: 20px;
-      padding: 22px; text-align: center; width: 100%; max-width: 360px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.45); margin-top: 14px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 18px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
     }
-    .qr {
-      width: 224px; height: 224px; border-radius: 14px; background: #fff;
-      padding: 8px; margin: 6px auto 14px; display: block;
-    }
-    .hint { color: var(--muted); font-size: 0.82rem; margin: 0 0 14px; }
-    .url {
-      display: block; font-family: ui-monospace, monospace; font-size: 0.72rem;
-      color: var(--accent); background: #1e1e2b; padding: 9px 11px;
-      border-radius: 9px; word-break: break-all; text-decoration: none;
-      border: 1px solid transparent; cursor: pointer;
-    }
-    .url:hover { border-color: var(--accent); }
 
-    .meta {
-      display: flex; justify-content: center; gap: 18px; margin-top: 14px;
-      color: var(--muted); font-size: 0.78rem;
+    .card-title {
+      font-size: 0.86rem;
+      font-weight: 700;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
     }
-    .meta b { color: var(--text); font-weight: 600; }
 
-    .actions { display: flex; gap: 10px; margin-top: 16px; width: 100%; max-width: 360px; }
-    button {
-      flex: 1; background: var(--accent-soft); color: var(--accent);
-      border: 1px solid var(--accent); border-radius: 11px; padding: 10px;
-      font-size: 0.85rem; cursor: pointer; font-weight: 600;
+    .card-subtitle {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-bottom: 14px;
     }
-    button:hover { background: var(--accent); color: #fff; }
 
-    .toggle {
-      display: flex; align-items: center; gap: 10px; margin-top: 18px;
-      color: var(--muted); font-size: 0.83rem; cursor: pointer; user-select: none;
+    /* Colonne Gauche : Appairage */
+    .qr-frame {
+      background: #ffffff;
+      padding: 10px;
+      border-radius: 14px;
+      width: 165px;
+      height: 165px;
+      margin: 0 auto 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+      cursor: pointer;
+      position: relative;
+      transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s;
     }
-    .toggle input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+    .qr-frame:hover {
+      transform: translateY(-2px) scale(1.02);
+      box-shadow: 0 10px 28px rgba(99, 102, 241, 0.4);
+    }
+    .qr-zoom-hint {
+      position: absolute;
+      bottom: 6px;
+      right: 6px;
+      background: rgba(18, 20, 32, 0.88);
+      backdrop-filter: blur(6px);
+      color: #ffffff;
+      font-size: 0.62rem;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .qr-frame:hover .qr-zoom-hint {
+      opacity: 1;
+    }
 
-    .footer { color: var(--muted); font-size: 0.72rem; margin-top: 20px; text-align: center; max-width: 360px; line-height: 1.5; }
+    .qr-frame img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      image-rendering: pixelated;
+    }
+
+    /* Modal Zoom QR Code */
+    .qr-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(5, 6, 14, 0.85);
+      backdrop-filter: blur(12px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease;
+      padding: 20px;
+    }
+    .qr-modal-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .qr-modal-card {
+      background: #121422;
+      border: 1px solid #282e4a;
+      border-radius: 22px;
+      padding: 26px 30px;
+      text-align: center;
+      max-width: 440px;
+      width: 100%;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.7), 0 0 50px rgba(99, 102, 241, 0.18);
+      position: relative;
+      transform: scale(0.9);
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .qr-modal-backdrop.open .qr-modal-card {
+      transform: scale(1);
+    }
+
+    .qr-modal-close {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #94a3b8;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      font-size: 0.95rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+    .qr-modal-close:hover {
+      background: var(--err);
+      color: #fff;
+      border-color: var(--err);
+    }
+
+    .qr-modal-title {
+      font-size: 1.12rem;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 4px;
+    }
+    .qr-modal-sub {
+      font-size: 0.76rem;
+      color: var(--text-muted);
+      margin-bottom: 18px;
+    }
+
+    .qr-modal-frame {
+      background: #ffffff;
+      padding: 14px;
+      border-radius: 18px;
+      width: 280px;
+      height: 280px;
+      margin: 0 auto 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 10px 35px rgba(0,0,0,0.4);
+    }
+    .qr-modal-frame img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      image-rendering: pixelated;
+    }
+
+    .qr-modal-pin-box {
+      background: #0b0c14;
+      border: 1px solid #232740;
+      border-radius: 12px;
+      padding: 10px 14px;
+      margin: 0 auto 12px;
+      max-width: 280px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .qr-modal-pin-label {
+      font-size: 0.65rem;
+      font-weight: 700;
+      color: var(--accent-light);
+      letter-spacing: 0.8px;
+    }
+    .qr-modal-pin-val {
+      font-family: ui-monospace, monospace;
+      font-size: 1.9rem;
+      font-weight: 900;
+      letter-spacing: 6px;
+      color: #ffffff;
+      text-shadow: 0 0 16px rgba(99, 102, 241, 0.5);
+      margin-top: 2px;
+    }
+
+    .qr-modal-hint {
+      font-size: 0.69rem;
+      color: var(--text-dim);
+    }
+
+    /* Bloc PIN Bluetooth / LAN */
+    .pin-box {
+      background: #0b0c14;
+      border: 1px solid #232740;
+      border-radius: 12px;
+      padding: 10px 12px;
+      text-align: center;
+      margin-bottom: 12px;
+      cursor: pointer;
+      position: relative;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .pin-box:hover {
+      border-color: var(--accent);
+      background: #0f111c;
+    }
+
+    .pin-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.64rem;
+      font-weight: 700;
+      color: var(--accent-light);
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+
+    .pin-copy-hint {
+      font-size: 0.62rem;
+      color: var(--text-dim);
+      font-weight: 500;
+    }
+
+    .pin-value {
+      font-family: ui-monospace, monospace;
+      font-size: 1.8rem;
+      font-weight: 900;
+      letter-spacing: 6px;
+      color: #ffffff;
+      text-shadow: 0 0 16px rgba(99, 102, 241, 0.45);
+      margin: 2px 0;
+    }
+
+    .pin-footer {
+      font-size: 0.67rem;
+      color: var(--text-muted);
+    }
+
+    .url-box {
+      background: #0b0c14;
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 8px 10px;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .url-text {
+      font-family: ui-monospace, monospace;
+      font-size: 0.68rem;
+      color: var(--accent-light);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+    }
+
+    .url-copy-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.8rem;
+      padding: 2px 4px;
+      border-radius: 4px;
+      transition: color 0.15s;
+    }
+    .url-copy-btn:hover { color: #fff; }
+
+    .action-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .btn {
+      background: var(--card-border);
+      color: var(--text);
+      border: 1px solid #2a304e;
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 0.76rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+    .btn:hover {
+      background: #252a45;
+      border-color: var(--accent);
+      color: #ffffff;
+    }
+    .btn-accent {
+      background: var(--accent-soft);
+      color: var(--accent-light);
+      border-color: rgba(99, 102, 241, 0.35);
+    }
+    .btn-accent:hover {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #ffffff;
+    }
+
+    /* Colonne Droite : Appareils & Préférences */
+    .col-right {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .clients-badge {
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #0d0e17;
+      color: var(--text-dim);
+      border: 1px solid var(--card-border);
+    }
+    .clients-badge.active {
+      background: var(--ok-soft);
+      color: var(--ok);
+      border-color: rgba(16, 185, 129, 0.35);
+    }
+
+    .clients-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 120px;
+    }
+
+    .client-empty {
+      background: #0b0c14;
+      border: 1px dashed #232740;
+      border-radius: 12px;
+      padding: 30px 16px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .client-empty-icon {
+      font-size: 2rem;
+      opacity: 0.6;
+    }
+    .client-empty-title {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .client-empty-sub {
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      max-width: 280px;
+      line-height: 1.4;
+    }
+
+    .client-card {
+      background: #0b0c14;
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      transition: border-color 0.2s;
+    }
+    .client-card:hover {
+      border-color: #2b3252;
+    }
+
+    .client-device-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: #171a2a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.25rem;
+      flex-shrink: 0;
+    }
+
+    .client-details {
+      flex: 1;
+      min-width: 0;
+    }
+    .client-device-name {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .client-pulse-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--ok);
+      box-shadow: 0 0 8px var(--ok);
+      flex-shrink: 0;
+    }
+    .client-device-meta {
+      font-size: 0.69rem;
+      color: var(--text-muted);
+      font-family: ui-monospace, monospace;
+      margin-top: 2px;
+    }
+
+    .client-kick {
+      background: transparent;
+      border: 1px solid rgba(244, 63, 94, 0.25);
+      color: var(--err);
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .client-kick:hover {
+      background: var(--err);
+      color: #ffffff;
+    }
+
+    /* Carte Réglages & Astuces */
+    .pref-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 6px 0;
+    }
+
+    .pref-info h3 {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #ffffff;
+    }
+    .pref-info p {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      margin-top: 1px;
+    }
+
+    /* Switch iOS moderne */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 38px;
+      height: 22px;
+      flex-shrink: 0;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #242940;
+      transition: 0.25s;
+      border-radius: 999px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 16px;
+      width: 16px;
+      left: 3px;
+      bottom: 3px;
+      background-color: #fff;
+      transition: 0.25s;
+      border-radius: 50%;
+    }
+    input:checked + .slider { background-color: var(--accent); }
+    input:checked + .slider:before { transform: translateX(16px); }
+
+    /* Tips & Features badge list */
+    .features-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 14px;
+      border-top: 1px solid var(--card-border);
+      padding-top: 14px;
+    }
+
+    .feature-item {
+      background: #0b0c14;
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-size: 0.69rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .feature-item span:first-child { font-size: 0.95rem; }
+
+    /* Toast notification */
+    #toast {
+      position: fixed;
+      bottom: 20px;
+      right: 24px;
+      background: #1e2238;
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      border: 1px solid var(--accent);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+      opacity: 0;
+      transform: translateY(10px);
+      transition: all 0.2s ease;
+      pointer-events: none;
+      z-index: 100;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+
+    footer {
+      text-align: center;
+      padding: 10px 24px 14px;
+      color: var(--text-dim);
+      font-size: 0.68rem;
+    }
   </style>
 </head>
 <body>
+
+  <!-- En-tête -->
   <header>
-    <h1>🌐 Nexus Remote All</h1>
-    <div class="sub">Télécommande universelle pour votre PC</div>
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div class="brand-info">
+        <h1>Nexus Remote All <span class="version-tag">v0.5.0</span></h1>
+        <p>Serveur hôte & télécommande universelle pour PC</p>
+      </div>
+    </div>
+
+    <div class="header-status">
+      <div class="net-pill">
+        IP&nbsp;: <b id="ip">—</b> &bull; Port&nbsp;: <b id="port">4700</b>
+      </div>
+      <div class="status-pill">
+        <span class="dot" id="dot"></span>
+        <span id="statusText">Démarrage…</span>
+      </div>
+    </div>
   </header>
 
-  <div class="status">
-    <span class="dot" id="dot"></span>
-    <span id="statusText">Démarrage de l'agent…</span>
-  </div>
+  <!-- Contenu principal -->
+  <main>
+    <!-- Colonne Gauche : Appairage -->
+    <div class="card">
+      <div class="card-title">
+        <span>📲 Appairage Rapide</span>
+        <span style="font-size: 0.75rem; color: var(--accent-light);">Wi-Fi Direct</span>
+      </div>
+      <div class="card-subtitle">Scannez ce QR Code avec l'appareil photo du smartphone</div>
 
-  <div class="card">
-    <img class="qr" id="qr" alt="QR Code d'appairage" />
-    <p class="hint">Scannez ce QR Code avec l'appareil photo de votre smartphone (même Wi-Fi).</p>
-    <a class="url" id="url" title="Ouvrir dans le navigateur">…</a>
-    <div class="meta">
-      <span>IP&nbsp;: <b id="ip">—</b></span>
-      <span>Port&nbsp;: <b id="port">—</b></span>
+      <div class="qr-frame" id="qrFrame" title="Cliquer pour afficher en grand">
+        <img id="qr" alt="QR Code d'appairage" />
+        <span class="qr-zoom-hint">🔍 Agrandir</span>
+      </div>
+
+      <!-- Code PIN Bluetooth / LAN -->
+      <div class="pin-box" id="pinCard" title="Cliquer pour copier le code">
+        <div class="pin-header">
+          <span>Code d'appairage LAN</span>
+          <span class="pin-copy-hint" id="pinCopyHint">Copier</span>
+        </div>
+        <div class="pin-value" id="pinCode">--- ---</div>
+        <div class="pin-footer">À saisir sur le mobile s'il détecte ce PC sur le réseau</div>
+      </div>
+
+      <!-- URL directe -->
+      <div class="url-box">
+        <span class="url-text" id="url" title="Cliquer pour ouvrir dans le navigateur">Chargement…</span>
+        <button class="url-copy-btn" id="copyUrlBtn" title="Copier le lien direct">📋</button>
+      </div>
+
+      <!-- Boutons d'action -->
+      <div class="action-row">
+        <button class="btn btn-accent" id="refresh" title="Régénère le code PIN et le QR Code">
+          🔄 Nouveau Code
+        </button>
+        <button class="btn" id="open" title="Ouvrir la page de connexion dans le navigateur">
+          🌐 Page Web
+        </button>
+      </div>
+    </div>
+
+    <!-- Colonne Droite : Appareils & Paramètres -->
+    <div class="col-right">
+      <!-- Section Appareils Connectés -->
+      <div class="card">
+        <div class="card-title">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span>📱 Appareils connectés</span>
+          </div>
+          <span class="clients-badge" id="clientCountBadge">0 actif</span>
+        </div>
+        <div class="card-subtitle">Terminaux mobiles contrôlant actuellement ce PC</div>
+
+        <div class="clients-list" id="clientsList">
+          <div class="client-empty">
+            <span class="client-empty-icon">📡</span>
+            <div class="client-empty-title">En attente d'un smartphone…</div>
+            <div class="client-empty-sub">
+              Scannez le QR Code ou entrez le code PIN depuis votre smartphone connecté au même Wi-Fi.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section Préférences & Raccourcis -->
+      <div class="card">
+        <div class="card-title">
+          <span>⚙️ Paramètres & Contrôles</span>
+        </div>
+        <div class="card-subtitle">Options du serveur et fonctionnalités actives</div>
+
+        <div class="pref-row">
+          <div class="pref-info">
+            <h3>Lancer au démarrage de Windows</h3>
+            <p>Nexus Remote démarre discrètement en arrière-plan à l'ouverture de session.</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="autolaunch" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="features-grid">
+          <div class="feature-item">
+            <span>🖱️</span>
+            <div><b>Trackpad & Scroll</b><br>Défilement fluide à 2 doigts</div>
+          </div>
+          <div class="feature-item">
+            <span>🛡️</span>
+            <div><b>Mode Admin</b><br>Contrôle des fenêtres UAC</div>
+          </div>
+          <div class="feature-item">
+            <span>⌨️</span>
+            <div><b>Clavier complet</b><br>Saisie et touches de fonction</div>
+          </div>
+          <div class="feature-item">
+            <span>📊</span>
+            <div><b>Diaporama & Macros</b><br>Présentations PowerPoint & PDF</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    Nexus Remote All &bull; Réduisez cette fenêtre pour la masquer dans la barre des tâches (systray).
+  </footer>
+
+  <div id="toast">Copié dans le presse-papiers !</div>
+
+  <!-- Modal d'agrandissement du QR Code -->
+  <div class="qr-modal-backdrop" id="qrModal">
+    <div class="qr-modal-card">
+      <button class="qr-modal-close" id="qrModalClose" title="Fermer (Échap)">✕</button>
+      <div class="qr-modal-title">📲 Scanner pour connecter</div>
+      <div class="qr-modal-sub">Scannez ce QR Code avec l'appareil photo du smartphone ou de la tablette</div>
+      <div class="qr-modal-frame">
+        <img id="qrLarge" alt="QR Code agrandi" />
+      </div>
+      <div class="qr-modal-pin-box">
+        <span class="qr-modal-pin-label">CODE PIN D'APPAIRAGE</span>
+        <span class="qr-modal-pin-val" id="qrModalPin">--- ---</span>
+      </div>
+      <div class="qr-modal-hint">Cliquez n'importe où pour fermer ou appuyez sur Échap</div>
     </div>
   </div>
-
-  <div class="actions">
-    <button id="refresh">🔄 Nouveau QR</button>
-    <button id="open">🖥️ Page LAN</button>
-  </div>
-
-  <label class="toggle">
-    <input type="checkbox" id="autolaunch" />
-    Démarrer automatiquement au lancement de Windows
-  </label>
-
-  <p class="footer">
-    Gardez cette application ouverte tant que vous utilisez la télécommande.
-    Elle reste active dans la barre système lorsque vous fermez la fenêtre.
-  </p>
 
   <script>
     const $ = (id) => document.getElementById(id);
 
+    function showToast(msg) {
+      const toast = $("toast");
+      toast.textContent = msg;
+      toast.classList.add("show");
+      setTimeout(() => toast.classList.remove("show"), 2000);
+    }
+
     function setStatus(state, text) {
       const dot = $("dot");
-      dot.className = "dot" + (state === "on" ? " on" : state === "err" ? " err" : "");
+      dot.className = "dot" + (state === "on" ? " on" : state === "wait" ? " wait" : state === "err" ? " err" : "");
       $("statusText").textContent = text;
     }
 
-    function render(status) {
-      if (!status || !status.ok) {
-        setStatus("err", "Agent indisponible — redémarrez l'application.");
+    function getDeviceIcon(device) {
+      const d = (device || "").toLowerCase();
+      if (d.includes("iphone") || d.includes("ipad")) return "🍏";
+      if (d.includes("android")) return "🤖";
+      if (d.includes("windows") || d.includes("pc")) return "💻";
+      if (d.includes("mac")) return "🍎";
+      return "📱";
+    }
+
+    function renderClients(clients) {
+      const list = $("clientsList");
+      const badge = $("clientCountBadge");
+      const arr = clients || [];
+
+      if (arr.length === 0) {
+        badge.className = "clients-badge";
+        badge.textContent = "0 actif";
+        list.innerHTML = `
+          <div class="client-empty">
+            <span class="client-empty-icon">📡</span>
+            <div class="client-empty-title">En attente d'un smartphone…</div>
+            <div class="client-empty-sub">
+              Scannez le QR Code ou entrez le code PIN depuis votre smartphone connecté au même Wi-Fi.
+            </div>
+          </div>
+        `;
         return;
       }
-      setStatus("on", "Agent actif — prêt à l'appairage");
-      $("ip").textContent = status.ip;
-      $("port").textContent = status.httpPort;
+
+      badge.className = "clients-badge active";
+      badge.textContent = `${arr.length} connecté${arr.length > 1 ? "s" : ""}`;
+      list.innerHTML = "";
+
+      arr.forEach((c) => {
+        const item = document.createElement("div");
+        item.className = "client-card";
+        const icon = getDeviceIcon(c.device);
+        const name = c.name || c.device || "Mobile";
+
+        item.innerHTML = `
+          <div class="client-device-icon">${icon}</div>
+          <div class="client-details">
+            <div class="client-device-name">
+              <span>${name}</span>
+              <span class="client-pulse-dot" title="En ligne"></span>
+            </div>
+            <div class="client-device-meta">${c.ip} &bull; Contrôle actif</div>
+          </div>
+          <button class="client-kick" title="Déconnecter cet appareil">✕ Déconnecter</button>
+        `;
+
+        item.querySelector(".client-kick").onclick = async () => {
+          if (window.nexus && window.nexus.disconnectClient) {
+            await window.nexus.disconnectClient(c.id);
+            showToast("Appareil déconnecté");
+          }
+        };
+        list.appendChild(item);
+      });
+    }
+
+    function render(status) {
+      if (!status) return;
+      if (status.booting) {
+        setStatus("wait", "Démarrage…");
+        return;
+      }
+      if (!status.ok) {
+        setStatus("err", status.error || "Indisponible");
+        return;
+      }
+      setStatus("on", "En ligne");
+      if (status.ip) $("ip").textContent = status.ip;
+      if (status.httpPort) $("port").textContent = status.httpPort;
+
       if (status.pairing) {
-        $("qr").src = status.pairing.qrDataUrl;
-        $("url").textContent = status.pairing.url;
-        $("url").dataset.url = status.pairing.url;
+        if ($("qr").src !== status.pairing.qrDataUrl) {
+          $("qr").src = status.pairing.qrDataUrl;
+          if ($("qrLarge")) $("qrLarge").src = status.pairing.qrDataUrl;
+        }
+        if ($("url").textContent !== status.pairing.url) {
+          $("url").textContent = status.pairing.url;
+          $("url").dataset.url = status.pairing.url;
+        }
+        if (status.pairing.pin && $("pinCode").textContent !== status.pairing.pin) {
+          $("pinCode").textContent = status.pairing.pin;
+          if ($("qrModalPin")) $("qrModalPin").textContent = status.pairing.pin;
+        }
+      }
+      if (status.clients !== undefined) {
+        renderClients(status.clients);
       }
     }
 
     async function load() {
       try {
-        render(await window.nexus.getStatus());
-        $("autolaunch").checked = await window.nexus.getAutoLaunch();
+        const s = await window.nexus.getStatus();
+        render(s);
+        const auto = await window.nexus.getAutoLaunch();
+        $("autolaunch").checked = !!auto;
       } catch (e) {
         setStatus("err", "Erreur : " + e);
       }
     }
 
+    if (window.nexus && window.nexus.onStatusUpdated) {
+      window.nexus.onStatusUpdated((status) => {
+        render(status);
+      });
+    }
+
+    if (window.nexus && window.nexus.onClientsUpdated) {
+      window.nexus.onClientsUpdated((clients) => {
+        renderClients(clients);
+      });
+    }
+
+    // Auto-poll garde-fou toutes les 3s
+    setInterval(async () => {
+      try {
+        const s = await window.nexus.getStatus();
+        if (s) render(s);
+      } catch {}
+    }, 3000);
+
+    // Clic pour copier le code PIN
+    $("pinCard").addEventListener("click", () => {
+      const pin = $("pinCode").textContent.replace(/\s+/g, "");
+      if (pin && pin !== "------") {
+        navigator.clipboard.writeText(pin).then(() => {
+          showToast(`Code PIN ${pin} copié !`);
+        });
+      }
+    });
+
+    // Clic pour copier l'URL
+    $("copyUrlBtn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      const u = $("url").dataset.url;
+      if (u) {
+        navigator.clipboard.writeText(u).then(() => {
+          showToast("Lien d'appairage copié !");
+        });
+      }
+    });
+
     $("refresh").addEventListener("click", async () => {
-      const res = await window.nexus.refreshPairing();
-      if (res && res.ok && res.pairing) {
-        $("qr").src = res.pairing.qrDataUrl;
-        $("url").textContent = res.pairing.url;
-        $("url").dataset.url = res.pairing.url;
+      $("refresh").disabled = true;
+      $("refresh").textContent = "Génération…";
+      try {
+        const res = await window.nexus.refreshPairing();
+        if (res && res.ok && res.pairing) {
+          $("qr").src = res.pairing.qrDataUrl;
+          $("url").textContent = res.pairing.url;
+          $("url").dataset.url = res.pairing.url;
+          if (res.pairing.pin) {
+            $("pinCode").textContent = res.pairing.pin;
+            if ($("qrModalPin")) $("qrModalPin").textContent = res.pairing.pin;
+          }
+          if ($("qrLarge")) $("qrLarge").src = res.pairing.qrDataUrl;
+          showToast("Nouveau code généré !");
+        }
+      } finally {
+        $("refresh").disabled = false;
+        $("refresh").textContent = "🔄 Nouveau Code";
       }
     });
 
     $("open").addEventListener("click", async () => {
       const s = await window.nexus.getStatus();
-      if (s && s.pairingDisplayUrl) window.nexus.openExternal(s.pairingDisplayUrl);
+      const targetUrl = (s && s.pairing && s.pairing.url) ? s.pairing.url : (s && s.pairingDisplayUrl ? s.pairingDisplayUrl : null);
+      if (targetUrl) window.nexus.openExternal(targetUrl);
     });
 
     $("url").addEventListener("click", () => {
@@ -161,6 +1054,35 @@
     $("autolaunch").addEventListener("change", async (e) => {
       const val = await window.nexus.setAutoLaunch(e.target.checked);
       e.target.checked = val;
+      showToast(val ? "Démarrage automatique activé" : "Démarrage automatique désactivé");
+    });
+
+    // Gestion du zoom / agrandissement du QR Code
+    function openQrModal() {
+      const qrSrc = $("qr").src;
+      if (qrSrc) {
+        $("qrLarge").src = qrSrc;
+        $("qrModalPin").textContent = $("pinCode").textContent;
+        $("qrModal").classList.add("open");
+      }
+    }
+
+    function closeQrModal() {
+      $("qrModal").classList.remove("open");
+    }
+
+    $("qrFrame").addEventListener("click", openQrModal);
+    $("qrModalClose").addEventListener("click", closeQrModal);
+    $("qrModal").addEventListener("click", (e) => {
+      if (e.target === $("qrModal")) {
+        closeQrModal();
+      }
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && $("qrModal").classList.contains("open")) {
+        closeQrModal();
+      }
     });
 
     load();

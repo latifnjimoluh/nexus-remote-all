@@ -58,6 +58,10 @@ export async function handleCommand(raw: unknown): Promise<void> {
     case "slide:black":
       return Kbd.tap("B");
 
+    // --- Identification / Handshake ---
+    case "client:hello":
+      return Promise.resolve();
+
     default: {
       // Sécurité de typage : si un cas manque, TypeScript le signale ici.
       const _exhaustive: never = cmd;

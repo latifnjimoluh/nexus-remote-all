@@ -22,10 +22,31 @@ export async function click(button: MouseButton): Promise<void> {
   await mouse.click(BUTTONS[button]);
 }
 
-/** Défilement. dy>0 = vers le bas, dx>0 = vers la droite. */
+/**
+ * Défilement molette souris.
+ * dy > 0 = vers le bas, dy < 0 = vers le haut
+ * dx > 0 = vers la droite, dx < 0 = vers la gauche
+ */
 export async function scroll(dx: number, dy: number): Promise<void> {
-  if (dy) dy > 0 ? await mouse.scrollDown(dy) : await mouse.scrollUp(-dy);
-  if (dx) dx > 0 ? await mouse.scrollRight(dx) : await mouse.scrollLeft(-dx);
+  // Limiter l'amplitude par événement pour éviter tout gel du thread d'injection
+  const safeDy = Math.min(Math.max(Math.round(dy), -20), 20);
+  const safeDx = Math.min(Math.max(Math.round(dx), -20), 20);
+
+  if (safeDy) {
+    if (safeDy > 0) {
+      await mouse.scrollDown(safeDy);
+    } else {
+      await mouse.scrollUp(-safeDy);
+    }
+  }
+
+  if (safeDx) {
+    if (safeDx > 0) {
+      await mouse.scrollRight(safeDx);
+    } else {
+      await mouse.scrollLeft(-safeDx);
+    }
+  }
 }
 
 export async function dragStart(): Promise<void> {

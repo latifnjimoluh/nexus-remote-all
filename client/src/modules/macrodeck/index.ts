@@ -96,13 +96,28 @@ export function renderMacrodeck(root: HTMLElement): void {
     {
       id: "screenshot",
       label: "Capture",
-      sublabel: "Zone d'écran",
+      sublabel: "Zone (Win+Maj+S)",
       icon: "📸",
       colorClass: "from-[#2f2208] to-[#181104] text-amber-300",
       borderClass: "border-amber-500/40 hover:border-amber-500",
       glowClass: "shadow-[0_6px_20px_rgba(245,158,11,0.2)]",
-      onTrigger: () =>
-        send({ type: "key:combo", keys: ["LeftSuper", "LeftShift", "S"] }),
+      onTrigger: () => {
+        send({ type: "key:combo", keys: ["LeftSuper", "LeftShift", "S"] });
+        showToast("Outil Capture lancé (Win+Maj+S)", "info", 1800);
+      },
+    },
+    {
+      id: "printscreen",
+      label: "Impr. Écran",
+      sublabel: "Plein Écran",
+      icon: "🖼️",
+      colorClass: "from-[#2b1f08] to-[#160f04] text-amber-200",
+      borderClass: "border-amber-500/30 hover:border-amber-500",
+      glowClass: "shadow-[0_6px_20px_rgba(245,158,11,0.15)]",
+      onTrigger: () => {
+        send({ type: "key:tap", key: "PrintScreen" });
+        showToast("Capture d'écran copiée !", "success", 1800);
+      },
     },
     {
       id: "fullscreen",

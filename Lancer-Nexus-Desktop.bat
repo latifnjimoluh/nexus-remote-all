@@ -1,25 +1,35 @@
 @echo off
-title Nexus Remote All — Application Bureau
 chcp 65001 >nul
+title Nexus Remote All - Application Bureau
 color 0b
 cls
 echo ======================================================================
-echo       🌐 NEXUS REMOTE ALL — APPLICATION BUREAU NATIVE (ELECTRON)
+echo       NEXUS REMOTE ALL - APPLICATION BUREAU NATIVE (INSTALLABLE)
 echo ======================================================================
 echo.
-echo   Ouverture de la fenetre de controle Nexus Remote All...
+echo   Lancement de l'application bureau Nexus Remote All...
 echo.
 
-cd /d "%~dp0"
+set "INSTALLED_EXE=%LOCALAPPDATA%\Programs\Nexus Remote All\Nexus Remote All.exe"
+set "UNPACKED_EXE=%~dp0desktop\release\win-unpacked\Nexus Remote All.exe"
 
-:: Verification de Node.js
-where node >nul 2>nul
-if %errorlevel% neq 0 (
-    echo [ERREUR] Node.js n'est pas detecte sur cette machine.
-    pause
-    exit /b 1
+if exist "%INSTALLED_EXE%" (
+    echo [OK] Lancement de l'application installee :
+    echo      "%INSTALLED_EXE%"
+    start "" "%INSTALLED_EXE%"
+    timeout /t 2 >nul
+    exit /b 0
 )
 
-:: Lancement de l'application Electron dans la session graphique Windows
+if exist "%UNPACKED_EXE%" (
+    echo [OK] Lancement de la version portable :
+    echo      "%UNPACKED_EXE%"
+    start "" "%UNPACKED_EXE%"
+    timeout /t 2 >nul
+    exit /b 0
+)
+
+echo [INFO] Lancement via Electron...
+cd /d "%~dp0"
 start "" npx electron desktop
-exit
+exit /b 0
