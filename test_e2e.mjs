@@ -41,7 +41,32 @@ async function run() {
     }
   });
 
-  await sleep(1500);
+  // Drainer stdout pour éviter tout blocage du pipe (le serveur écrit un gros QR ASCII).
+  serverProcess.stdout.on("data", () => {});
+
+  // Attente ACTIVE que le serveur soit prêt (plus fiable qu'un délai fixe :
+  // le démarrage v0.4 — mDNS + JWT + QR + Express static — dépasse parfois 1,5 s).
+  {
+    const deadline = Date.now() + 15000;
+    let ready = false;
+    while (Date.now() < deadline) {
+      try {
+        const r = await fetch(`http://127.0.0.1:${HTTP_PORT}/health`);
+        if (r.status === 200) {
+          ready = true;
+          break;
+        }
+      } catch {
+        // pas encore prêt
+      }
+      await sleep(300);
+    }
+    if (!ready) {
+      console.error("❌ Le serveur d'intégration n'a pas démarré dans le délai imparti.");
+      if (serverProcess) serverProcess.kill();
+      process.exit(1);
+    }
+  }
 
   // 2. Test HTTP /health
   let token = "";
