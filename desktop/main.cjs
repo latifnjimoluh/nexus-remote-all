@@ -29,7 +29,8 @@ async function bootstrap() {
   try {
     // Import dynamique du module ESM de l'agent depuis un contexte CJS.
     const { startAgent } = await import(pathToFileURL(AGENT_ENTRY).href);
-    agent = await startAgent({ clientDist: CLIENT_DIST, log: true });
+    const enableCloud = process.env.NEXUS_CLOUD !== "0";
+    agent = await startAgent({ clientDist: CLIENT_DIST, log: true, enableCloud });
   } catch (err) {
     console.error("[Desktop] Échec du démarrage de l'agent :", err);
     // On affiche quand même la fenêtre pour signaler l'erreur.
@@ -51,6 +52,7 @@ function createWindow() {
     icon: ICON_PATH,
     backgroundColor: "#0a0a0f",
     autoHideMenuBar: true,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -59,6 +61,11 @@ function createWindow() {
   });
 
   mainWindow.loadFile(UI_INDEX);
+
+  mainWindow.once("ready-to-show", () => {
+    mainWindow.show();
+    mainWindow.focus();
+  });
 
   // Fermer la fenêtre = réduire dans la barre système (l'agent continue).
   mainWindow.on("close", (event) => {
@@ -77,14 +84,18 @@ function showWindow() {
 }
 
 function createTray() {
-  let img = nativeImage.createFromPath(TRAY_PATH);
-  if (!img.isEmpty()) {
-    img = img.resize({ width: 16, height: 16 });
+  try {
+    let img = nativeImage.createFromPath(TRAY_PATH);
+    if (!img.isEmpty()) {
+      img = img.resize({ width: 16, height: 16 });
+      tray = new Tray(img);
+      tray.setToolTip("Nexus Remote All — Agent actif");
+      refreshTrayMenu();
+      tray.on("double-click", () => showWindow());
+    }
+  } catch (err) {
+    console.warn("[Desktop] Icône de barre des tâches non disponible :", err.message);
   }
-  tray = new Tray(img.isEmpty() ? nativeImage.createEmpty() : img);
-  tray.setToolTip("Nexus Remote All — Agent actif");
-  refreshTrayMenu();
-  tray.on("double-click", () => showWindow());
 }
 
 function refreshTrayMenu() {
