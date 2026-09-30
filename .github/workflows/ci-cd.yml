@@ -61,7 +61,19 @@ jobs:
           username: root
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            mkdir -p /var/www/nexus-remote
-            cd /var/www/nexus-remote
-            git fetch --all || true
+            set -e
+            if [ ! -d "/var/www/nexus-repo/.git" ]; then
+              rm -rf /var/www/nexus-repo
+              git clone https://github.com/latifnjimoluh/nexus-remote-all.git /var/www/nexus-repo
+            fi
+            cd /var/www/nexus-repo
+            git fetch origin main
+            git reset --hard origin/main
+            npm install
+            npm run build
+            # Synchroniser les fichiers web PWA vers la racine Nginx
+            mkdir -p /var/www/nexus-remote/dist
+            cp -r client/dist/* /var/www/nexus-remote/dist/
+            # Redémarrer le service PM2 du relais Cloud
+            pm2 restart nexus-relay || pm2 start relay/dist/index.js --name nexus-relay
             systemctl reload nginx
