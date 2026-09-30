@@ -9,16 +9,18 @@
   },
   "workspaces": [
     "server",
-    "client"
+    "client",
+    "relay"
   ],
   "scripts": {
     "dev:server": "npm run dev -w server",
     "dev:client": "npm run dev -w client",
+    "dev:relay": "npm run dev -w relay",
     "dev": "concurrently -n server,client -c blue,magenta \"npm:dev:server\" \"npm:dev:client\"",
-    "build": "npm run build -w server && npm run build -w client",
+    "build": "npm run build -w server && npm run build -w client && npm run build -w relay",
     "start": "npm run start -w server",
     "test": "node test_e2e.mjs",
-    "typecheck": "npm run typecheck -w server && npm run typecheck -w client"
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w client && npm run typecheck -w relay"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

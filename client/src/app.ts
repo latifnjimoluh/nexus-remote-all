@@ -1,4 +1,10 @@
-import { connect, onStatus, type Status } from "./core/ws-client";
+import {
+  connect,
+  onStatus,
+  onError,
+  type Status,
+  type ConnectionConfig,
+} from "./core/ws-client";
 import { tapFeedback } from "./core/haptics";
 import { openSettingsModal } from "./core/settings";
 import { showToast } from "./core/toast";
@@ -9,15 +15,19 @@ import { renderMacrodeck } from "./modules/macrodeck";
 import { renderSlides } from "./modules/slides";
 import { renderPower } from "./modules/power";
 
-interface Cfg {
-  host: string;
-  port: number;
-  token: string;
-}
-
-/** Lit la configuration depuis l'URL (?host&ws&token) ou le localStorage */
-function readConfig(): Cfg | null {
+/** Lit la configuration depuis l'URL ou le localStorage */
+function readConfig(): ConnectionConfig | null {
   const q = new URLSearchParams(location.search);
+  const code = q.get("code") ?? localStorage.getItem("nexus.code");
+
+  // Priorité 1 : Code PIN Cloud (mode AnyDesk)
+  if (code && code.replace(/\D/g, "").length === 6) {
+    const cleanCode = code.replace(/\D/g, "");
+    localStorage.setItem("nexus.code", cleanCode);
+    return { mode: "cloud", code: cleanCode };
+  }
+
+  // Priorité 2 : Mode Local direct par IP
   const host = q.get("host") ?? localStorage.getItem("nexus.host");
   const port = q.get("ws") ?? localStorage.getItem("nexus.port");
   const token = q.get("token") ?? localStorage.getItem("nexus.token");
@@ -25,12 +35,18 @@ function readConfig(): Cfg | null {
     localStorage.setItem("nexus.host", host);
     localStorage.setItem("nexus.port", port);
     localStorage.setItem("nexus.token", token);
-    return { host, port: Number(port), token };
+    return { host, port: Number(port), token, mode: "local" };
   }
+
   return null;
 }
 
 export function bootstrap(root: HTMLElement): void {
+  // Gestionnaire global des erreurs de relais / connexion
+  onError((msg) => {
+    showToast(msg, "warning");
+  });
+
   const cfg = readConfig();
   if (cfg) {
     connect(cfg);
@@ -40,63 +56,141 @@ export function bootstrap(root: HTMLElement): void {
   }
 }
 
-/** Écran de connexion au design Dark Glassmorphism avec reflets et contrastes */
+/** Écran de connexion au design Dark Glassmorphism avec choix Cloud PIN ou IP Locale */
 function mountConnect(root: HTMLElement): void {
   root.className = "h-full flex items-center justify-center p-6 relative overflow-hidden";
   root.innerHTML = `
     <!-- Lueur d'ambiance d'arrière-plan -->
     <div class="absolute -top-32 left-1/2 -translate-x-1/2 w-96 h-96 bg-nexus-accent/20 rounded-full blur-3xl pointer-events-none"></div>
 
-    <div class="glass-panel-elevated w-full max-w-sm rounded-3xl p-6 sm:p-8 flex flex-col gap-6 relative z-10 border border-white/10">
+    <div class="glass-panel-elevated w-full max-w-sm rounded-3xl p-6 sm:p-8 flex flex-col gap-5 relative z-10 border border-white/10 shadow-2xl">
       <div class="text-center">
         <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-[#6d5efc] to-[#00f2fe] mx-auto flex items-center justify-center shadow-[0_0_30px_rgba(109,94,252,0.5)] mb-3">
           <span class="text-3xl">🌐</span>
         </div>
         <h1 class="text-2xl font-black tracking-tight text-white">Nexus Remote</h1>
-        <p class="text-nexus-muted text-xs mt-1">Contrôle universel PC, Mac & Smart TV</p>
+        <p class="text-nexus-muted text-xs mt-1">Télécommande universelle Cloud & Locale</p>
       </div>
 
-      <form id="cf" class="flex flex-col gap-3.5">
+      <!-- Sélecteur de Mode : Cloud (PIN) vs Local (IP) -->
+      <div class="flex p-1 bg-white/5 rounded-2xl border border-white/5">
+        <button id="tab-cloud" class="flex-1 py-2 text-xs font-bold rounded-xl bg-nexus-accent text-white shadow-md transition">
+          ☁️ Code PIN (Cloud)
+        </button>
+        <button id="tab-local" class="flex-1 py-2 text-xs font-bold rounded-xl text-nexus-muted hover:text-white transition">
+          📡 Réseau Local (IP)
+        </button>
+      </div>
+
+      <!-- 1. Formulaire MODE CLOUD (Par défaut - ultra simple) -->
+      <form id="form-cloud" class="flex flex-col gap-4">
         <div>
-          <label class="text-[11px] font-semibold text-nexus-muted uppercase tracking-wider mb-1 block">Adresse Hôte</label>
-          <div class="relative">
-            <input name="host" placeholder="ex: 192.168.1.20" required
-              class="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm text-white placeholder-white/30 outline-none focus:border-nexus-accent transition" />
-          </div>
+          <label class="text-[11px] font-semibold text-nexus-muted uppercase tracking-wider mb-2 block text-center">
+            Entrez le code à 6 chiffres affiché sur votre PC
+          </label>
+          <input id="cloud-pin" name="code" placeholder="ex: 842 195" maxlength="8" autofocus
+            class="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-2xl font-mono font-bold text-center tracking-[0.25em] text-white placeholder-white/20 outline-none focus:border-nexus-accent focus:shadow-[0_0_20px_rgba(109,94,252,0.3)] transition" />
+        </div>
+
+        <button type="submit" class="btn-accent font-bold text-sm py-3.5 flex items-center justify-center gap-2 shadow-[0_4px_20px_rgba(109,94,252,0.4)]">
+          <span>Se connecter au PC</span>
+          <span>→</span>
+        </button>
+
+        <p class="text-[11px] text-nexus-muted text-center leading-relaxed">
+          💡 Lancez l'agent Nexus sur l'ordinateur à contrôler pour obtenir votre code PIN instantané.
+        </p>
+      </form>
+
+      <!-- 2. Formulaire MODE LOCAL (IP Directe) -->
+      <form id="form-local" class="hidden flex-col gap-3.5">
+        <div>
+          <label class="text-[11px] font-semibold text-nexus-muted uppercase tracking-wider mb-1 block">Adresse IP Hôte</label>
+          <input name="host" placeholder="ex: 192.168.1.20"
+            class="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm text-white placeholder-white/30 outline-none focus:border-nexus-accent transition" />
         </div>
 
         <div class="grid grid-cols-3 gap-2">
           <div class="col-span-1">
             <label class="text-[11px] font-semibold text-nexus-muted uppercase tracking-wider mb-1 block">Port WS</label>
-            <input name="port" placeholder="4701" value="4701" required inputmode="numeric"
+            <input name="port" placeholder="4701" value="4701" inputmode="numeric"
               class="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm text-white placeholder-white/30 outline-none focus:border-nexus-accent transition text-center font-mono" />
           </div>
           <div class="col-span-2">
             <label class="text-[11px] font-semibold text-nexus-muted uppercase tracking-wider mb-1 block">Jeton (Token)</label>
-            <input name="token" placeholder="Token d'accès ou appairage" required
+            <input name="token" placeholder="Token local"
               class="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm text-white placeholder-white/30 outline-none focus:border-nexus-accent transition font-mono text-xs" />
           </div>
         </div>
 
-        <button type="submit" class="btn-accent mt-3 font-bold text-sm py-3.5 flex items-center justify-center gap-2">
-          <span>Se connecter</span>
+        <button type="submit" class="btn-accent mt-2 font-bold text-sm py-3 flex items-center justify-center gap-2">
+          <span>Connexion Locale</span>
           <span>→</span>
         </button>
       </form>
-
-      <div class="text-center pt-2 border-t border-white/5">
-        <p class="text-[11px] text-nexus-muted">
-          💡 Scannez le QR Code affiché sur votre PC ou entrez l'adresse IP manuellement.
-        </p>
-      </div>
     </div>
   `;
 
-  const form = root.querySelector<HTMLFormElement>("#cf")!;
-  form.onsubmit = (e) => {
+  const tabCloud = root.querySelector<HTMLButtonElement>("#tab-cloud")!;
+  const tabLocal = root.querySelector<HTMLButtonElement>("#tab-local")!;
+  const formCloud = root.querySelector<HTMLFormElement>("#form-cloud")!;
+  const formLocal = root.querySelector<HTMLFormElement>("#form-local")!;
+  const pinInput = root.querySelector<HTMLInputElement>("#cloud-pin")!;
+
+  // Formatage automatique du code PIN (ex: 842 195)
+  pinInput.oninput = () => {
+    let raw = pinInput.value.replace(/\D/g, "");
+    if (raw.length > 6) raw = raw.slice(0, 6);
+    if (raw.length > 3) {
+      pinInput.value = `${raw.slice(0, 3)} ${raw.slice(3)}`;
+    } else {
+      pinInput.value = raw;
+    }
+  };
+
+  // Bascule d'onglets
+  tabCloud.onclick = () => {
+    tapFeedback(12);
+    tabCloud.className = "flex-1 py-2 text-xs font-bold rounded-xl bg-nexus-accent text-white shadow-md transition";
+    tabLocal.className = "flex-1 py-2 text-xs font-bold rounded-xl text-nexus-muted hover:text-white transition";
+    formCloud.classList.remove("hidden");
+    formCloud.classList.add("flex");
+    formLocal.classList.add("hidden");
+    formLocal.classList.remove("flex");
+    pinInput.focus();
+  };
+
+  tabLocal.onclick = () => {
+    tapFeedback(12);
+    tabLocal.className = "flex-1 py-2 text-xs font-bold rounded-xl bg-nexus-accent text-white shadow-md transition";
+    tabCloud.className = "flex-1 py-2 text-xs font-bold rounded-xl text-nexus-muted hover:text-white transition";
+    formLocal.classList.remove("hidden");
+    formLocal.classList.add("flex");
+    formCloud.classList.add("hidden");
+    formCloud.classList.remove("flex");
+  };
+
+  // Soumission Cloud PIN
+  formCloud.onsubmit = (e) => {
     e.preventDefault();
     tapFeedback(20);
-    const data = new FormData(form);
+    const code = pinInput.value.replace(/\D/g, "");
+    if (code.length !== 6) {
+      showToast("Veuillez saisir un code PIN valide à 6 chiffres", "warning");
+      return;
+    }
+
+    localStorage.setItem("nexus.code", code);
+    localStorage.setItem("nexus.host", `PC [${code.slice(0, 3)}-${code.slice(3)}]`);
+    connect({ mode: "cloud", code });
+    mountShell(root);
+  };
+
+  // Soumission Local IP
+  formLocal.onsubmit = (e) => {
+    e.preventDefault();
+    tapFeedback(20);
+    const data = new FormData(formLocal);
     const host = String(data.get("host")).trim();
     const port = Number(data.get("port"));
     const token = String(data.get("token")).trim();
@@ -105,7 +199,7 @@ function mountConnect(root: HTMLElement): void {
     localStorage.setItem("nexus.port", String(port));
     localStorage.setItem("nexus.token", token);
 
-    connect({ host, port, token });
+    connect({ mode: "local", host, port, token });
     mountShell(root);
   };
 }
@@ -124,7 +218,7 @@ function mountShell(root: HTMLElement): void {
   root.className = "h-full flex flex-col justify-between overflow-hidden";
   root.innerHTML = "";
 
-  const savedHost = localStorage.getItem("nexus.host") || "Hôte distant";
+  const savedHost = localStorage.getItem("nexus.host") || "PC Connecté";
 
   // 1. Barre d'en-tête supérieure
   const bar = document.createElement("header");
@@ -181,6 +275,7 @@ function mountShell(root: HTMLElement): void {
     tapFeedback(20);
     if (confirm("Se déconnecter de la session actuelle ?")) {
       localStorage.removeItem("nexus.token");
+      localStorage.removeItem("nexus.code");
       location.reload();
     }
   };

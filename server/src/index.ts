@@ -9,42 +9,23 @@ import { handleCommand } from "./ws/router.js";
 import { verifyToken } from "./auth/middleware.js";
 import { pairingRouter, createPairingInfo } from "./auth/pairing.js";
 import { publishService } from "./discovery/mdns.js";
+import { startRelayClient } from "./relay-client.js";
 import type { Command, ServerMessage } from "../../shared/protocol.js";
 
-/**
- * Retourne l'IPv4 LAN réelle de l'hôte (adresse joignable par le smartphone).
- * Écarte les interfaces virtuelles (VMware, VirtualBox, WSL/Hyper-V, VPN, Docker…)
- * et les adresses APIPA (169.254.x), puis préfère la carte Wi-Fi, sinon Ethernet.
- */
+/** Retourne la première IPv4 non-interne (adresse LAN de l'hôte). */
 function getLocalIp(): string {
-  const candidates: Array<{ name: string; address: string }> = [];
-  for (const [name, addrs] of Object.entries(networkInterfaces())) {
-    for (const net of addrs ?? []) {
-      if (net.family !== "IPv4" || net.internal) continue;
-      if (net.address.startsWith("169.254.")) continue; // APIPA / link-local
-      candidates.push({ name, address: net.address });
+  for (const iface of Object.values(networkInterfaces())) {
+    for (const net of iface ?? []) {
+      if (net.family === "IPv4" && !net.internal) return net.address;
     }
   }
-
-  // Interfaces virtuelles à ignorer (nom convivial Windows/Linux)
-  const VIRTUAL =
-    /vmware|virtualbox|vbox|vethernet|hyper-?v|wsl|loopback|bluetooth|vpn|tap-?windows|tunnel|tun\d|docker|npcap/i;
-  const physical = candidates.filter((c) => !VIRTUAL.test(c.name));
-  const pool = physical.length > 0 ? physical : candidates;
-
-  // Préférence : Wi-Fi > Ethernet > première disponible
-  const chosen =
-    pool.find((c) => /wi-?fi|wireless|wlan|sans[- ]?fil/i.test(c.name)) ??
-    pool.find((c) => /ethernet|eth\d|en0/i.test(c.name)) ??
-    pool[0];
-
-  return chosen?.address ?? "127.0.0.1";
+  return "127.0.0.1";
 }
 
 const ip = getLocalIp();
 
 // ─────────────────────────────────────────────────────────────
-//  Serveur HTTP (santé, appairage & distribution PWA)
+//  Serveur HTTP (santé, appairage & distribution PWA locale)
 // ─────────────────────────────────────────────────────────────
 const app = express();
 app.use(express.json());
@@ -66,7 +47,7 @@ for (const dir of clientDistCandidates) {
 
 // Endpoint de santé
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: CONFIG.SERVICE_NAME, version: "0.4.0", ip });
+  res.json({ ok: true, service: CONFIG.SERVICE_NAME, version: "0.5.0", ip });
 });
 
 // Endpoints d'appairage (/pair/qr et /pair/display)
@@ -77,14 +58,14 @@ app.listen(CONFIG.HTTP_PORT, () => {
 });
 
 // ─────────────────────────────────────────────────────────────
-//  Serveur WebSocket (commandes temps réel avec auth verifyClient)
+//  Serveur WebSocket Local (commandes temps réel sur LAN)
 // ─────────────────────────────────────────────────────────────
 const wss = new WebSocketServer({
   port: CONFIG.WS_PORT,
   verifyClient: (info, callback) => {
     const token = new URL(info.req.url ?? "", "http://x").searchParams.get("token");
     if (!verifyToken(token)) {
-      console.warn("Connexion WebSocket refusée : token manquant ou invalide");
+      console.warn("Connexion WebSocket locale refusée : token manquant ou invalide");
       callback(false, 401, "Unauthorized");
     } else {
       callback(true);
@@ -93,7 +74,7 @@ const wss = new WebSocketServer({
 });
 
 wss.on("connection", (ws) => {
-  console.log("Client authentifié et connecté ✔");
+  console.log("Client local connecté ✔");
 
   ws.on("message", async (raw) => {
     let cmd: Command;
@@ -115,27 +96,22 @@ wss.on("connection", (ws) => {
     }
   });
 
-  ws.on("close", () => console.log("Client déconnecté"));
+  ws.on("close", () => console.log("Client local déconnecté"));
 });
 
 // ─────────────────────────────────────────────────────────────
-//  Publication mDNS & Bannière avec QR Code
+//  Services Réseau : mDNS Local + Relais Cloud à Code PIN
 // ─────────────────────────────────────────────────────────────
 publishService();
+
+// Connexion automatique au relais cloud (https://remote.unlineservice.com)
+startRelayClient();
 
 createPairingInfo(ip).then((info) => {
   console.log(`WS    → ws://0.0.0.0:${CONFIG.WS_PORT}`);
   console.log("═".repeat(56));
-  console.log(`  🌐 ${CONFIG.SERVICE_NAME} — Serveur Agent v0.4`);
-  console.log(`  Hôte LAN    : ${ip}`);
-  console.log(`  Page QR Web : http://${ip}:${CONFIG.HTTP_PORT}/pair/display`);
-  console.log(`  Lien direct : ${info.url}`);
-  console.log("═".repeat(56));
-  console.log("\n📱 Scannez le QR Code ci-dessous avec votre smartphone :");
-  try {
-    qrcodeTerminal.generate(info.url, { small: true });
-  } catch {
-    // Si la console ne supporte pas le rendu ANSI
-  }
+  console.log(`  🌐 ${CONFIG.SERVICE_NAME} — Agent Local Prêt`);
+  console.log(`  IP LAN locale : ${ip}`);
+  console.log(`  Page QR Web   : http://${ip}:${CONFIG.HTTP_PORT}/pair/display`);
   console.log("═".repeat(56));
 });
