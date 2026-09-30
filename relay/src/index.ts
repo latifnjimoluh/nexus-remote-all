@@ -1,8 +1,14 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage } from "node:http";
+import { randomInt } from "node:crypto";
 import express from "express";
 import { WebSocketServer, WebSocket } from "ws";
 
 const PORT = Number(process.env.PORT ?? 4720);
+
+// Anti-brute-force : fenêtre glissante par IP sur les codes invalides.
+const RATE_WINDOW_MS = 60_000;
+const RATE_MAX_FAILS = 10;
+const failCounts = new Map<string, { fails: number; resetAt: number }>();
 
 interface Session {
   code: string;
@@ -15,13 +21,31 @@ const sessions = new Map<string, Session>();
 // Index inverse pour nettoyage rapide à la déconnexion
 const wsToSession = new Map<WebSocket, { code: string; role: "agent" | "client" }>();
 
-/** Génère un code PIN à 6 chiffres unique non encore attribué. */
+/** Génère un code PIN à 6 chiffres cryptographiquement sûr (crypto.randomInt) et unique. */
 function generateUniqueCode(): string {
   let code = "";
   do {
-    code = Math.floor(100000 + Math.random() * 900000).toString();
+    code = randomInt(100000, 1000000).toString();
   } while (sessions.has(code));
   return code;
+}
+
+/** IP du client (gère X-Forwarded-For derrière un proxy pour le rate-limiting). */
+function clientIp(req: IncomingMessage): string {
+  const xff = req.headers["x-forwarded-for"];
+  if (typeof xff === "string" && xff.length > 0) return xff.split(",")[0].trim();
+  return req.socket.remoteAddress ?? "unknown";
+}
+
+/** Renvoie (et initialise/réinitialise) l'état de rate-limiting d'une IP. */
+function rateState(ip: string): { fails: number; resetAt: number } {
+  const now = Date.now();
+  let e = failCounts.get(ip);
+  if (!e || now > e.resetAt) {
+    e = { fails: 0, resetAt: now + RATE_WINDOW_MS };
+    failCounts.set(ip, e);
+  }
+  return e;
 }
 
 const app = express();
@@ -31,15 +55,11 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "Nexus Cloud Relay", activeSessions: sessions.size });
 });
 
+// /status : agrégats uniquement — ne divulgue JAMAIS les codes PIN.
 app.get("/status", (_req, res) => {
-  res.json({
-    sessionsCount: sessions.size,
-    sessions: Array.from(sessions.entries()).map(([code, s]) => ({
-      code,
-      hasClient: Boolean(s.clientWs),
-      uptimeSeconds: Math.round((Date.now() - s.createdAt) / 1000),
-    })),
-  });
+  let paired = 0;
+  for (const s of sessions.values()) if (s.clientWs) paired++;
+  res.json({ sessionsCount: sessions.size, pairedCount: paired });
 });
 
 const server = createServer(app);
@@ -56,7 +76,7 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
-wss.on("connection", (ws: WebSocket, req) => {
+wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
   (ws as any).isAlive = true;
   ws.on("pong", () => {
     (ws as any).isAlive = true;
@@ -69,7 +89,7 @@ wss.on("connection", (ws: WebSocket, req) => {
   const role = url.searchParams.get("role");
   const codeParam = url.searchParams.get("code")?.replace(/\D/g, ""); // normalise chiffres
 
-  // 1. Enregistrement d'un Agent (PC hôte à contrôler)
+  // ── 1. Enregistrement d'un Agent (PC hôte à contrôler) ──
   if (role === "agent") {
     const code = generateUniqueCode();
     const session: Session = {
@@ -118,10 +138,26 @@ wss.on("connection", (ws: WebSocket, req) => {
     return;
   }
 
-  // 2. Connexion d'un Client (Smartphone / Télécommande)
+  // ── 2. Connexion d'un Client (Smartphone / Télécommande) ──
   if (role === "client") {
+    const ip = clientIp(req);
+    const rl = rateState(ip);
+
+    // Rate-limiting : casse l'énumération des codes PIN (brute-force).
+    if (rl.fails >= RATE_MAX_FAILS) {
+      ws.send(
+        JSON.stringify({
+          type: "relay:error",
+          message: "Trop de tentatives. Patientez une minute avant de réessayer.",
+        }),
+      );
+      ws.close(4029, "rate_limited");
+      return;
+    }
+
     if (!codeParam || !sessions.has(codeParam)) {
-      console.warn(`[RELAY] Client refusé — Code invalide ou expiré : "${codeParam}"`);
+      rl.fails++;
+      console.warn(`[RELAY] Client refusé — code invalide "${codeParam}" (ip ${ip}, essais ${rl.fails})`);
       ws.send(
         JSON.stringify({
           type: "relay:error",
@@ -133,6 +169,19 @@ wss.on("connection", (ws: WebSocket, req) => {
     }
 
     const session = sessions.get(codeParam)!;
+
+    // Session à client unique : refuse un 2e appareil (empêche le vol de session en cours).
+    if (session.clientWs && session.clientWs.readyState === WebSocket.OPEN) {
+      ws.send(
+        JSON.stringify({
+          type: "relay:error",
+          message: "Cette session est déjà utilisée par un autre appareil.",
+        }),
+      );
+      ws.close(4009, "already_paired");
+      return;
+    }
+
     session.clientWs = ws;
     wsToSession.set(ws, { code: codeParam, role: "client" });
 
@@ -180,7 +229,7 @@ setInterval(() => {
   });
 }, 30000);
 
-// Nettoyage régulier des sessions orphelines (> 24h)
+// Nettoyage régulier : sessions orphelines (>24h) + compteurs de rate-limiting expirés.
 setInterval(() => {
   const now = Date.now();
   for (const [code, s] of sessions.entries()) {
@@ -189,6 +238,9 @@ setInterval(() => {
       if (s.clientWs) s.clientWs.close(4008, "session_expired");
       sessions.delete(code);
     }
+  }
+  for (const [ip, e] of failCounts.entries()) {
+    if (now > e.resetAt) failCounts.delete(ip);
   }
 }, 60000);
 
