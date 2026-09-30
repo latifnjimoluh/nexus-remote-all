@@ -1,0 +1,67 @@
+name: CI/CD Pipeline - Nexus Remote All
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-build:
+    name: 🧪 Tests & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Récupération du code
+        uses: actions/checkout@v4
+
+      - name: 🟢 Configuration de Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: 📦 Installation des dépendances
+        run: npm ci
+
+      - name: 🔍 Vérification TypeScript (Server & Client)
+        run: npm run typecheck
+
+      - name: 🏗️ Compilation de production
+        run: npm run build
+
+      - name: 🧪 Exécution des tests End-to-End
+        run: npm test
+
+  deploy:
+    name: 🚀 Déploiement VPS
+    needs: test-and-build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Récupération du code
+        uses: actions/checkout@v4
+
+      - name: 🟢 Configuration de Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: 📦 Installation & Build
+        run: |
+          npm ci
+          npm run build
+
+      - name: 🚀 Déploiement SSH sur le VPS (remote.unlineservice.com)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 51.68.191.239
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            mkdir -p /var/www/nexus-remote
+            cd /var/www/nexus-remote
+            git fetch --all || true
+            systemctl reload nginx
