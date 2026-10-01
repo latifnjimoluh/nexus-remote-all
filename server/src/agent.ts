@@ -140,6 +140,8 @@ export async function startAgent(options: AgentOptions = {}): Promise<AgentHandl
   // ───────────────────────────────────────────────────────────
   const wss = new WebSocketServer({
     port: CONFIG.WS_PORT,
+    // Défense anti-flood : une commande/enveloppe fait quelques Ko au plus.
+    maxPayload: 64 * 1024,
     verifyClient: (info, callback) => {
       // F2 — anti DNS-rebinding : si un Origin de navigateur est présent, son
       // hôte doit être local. (Origin absent = client non-navigateur.)

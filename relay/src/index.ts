@@ -30,10 +30,20 @@ function generateUniqueCode(): string {
   return code;
 }
 
-/** IP du client (gère X-Forwarded-For derrière un proxy pour le rate-limiting). */
+/**
+ * IP du client pour le rate-limiting (derrière le reverse-proxy nginx).
+ * nginx (`proxy_add_x_forwarded_for`) AJOUTE l'IP réelle en FIN de la liste
+ * X-Forwarded-For. On prend donc la DERNIÈRE entrée : un client malveillant
+ * peut injecter de fausses IP en tête, mais pas après celle ajoutée par nginx.
+ * Prendre la première (`[0]`) laisserait contourner le rate-limit (énumération
+ * des codes PIN) via des en-têtes XFF forgés.
+ */
 function clientIp(req: IncomingMessage): string {
   const xff = req.headers["x-forwarded-for"];
-  if (typeof xff === "string" && xff.length > 0) return xff.split(",")[0].trim();
+  if (typeof xff === "string" && xff.length > 0) {
+    const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1];
+  }
   return req.socket.remoteAddress ?? "unknown";
 }
 
@@ -63,7 +73,9 @@ app.get("/status", (_req, res) => {
 });
 
 const server = createServer(app);
-const wss = new WebSocketServer({ noServer: true });
+// maxPayload : défense anti-flood sur le relais public (les enveloppes chiffrées
+// relayées font quelques Ko ; on plafonne pour éviter l'épuisement mémoire).
+const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
 
 server.on("upgrade", (req, socket, head) => {
   const url = new URL(req.url ?? "", "http://x");
