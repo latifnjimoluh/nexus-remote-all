@@ -11,6 +11,7 @@ const APPS: Record<string, string> = {
   explorer: "start explorer",
   youtube: "start https://youtube.com",
   netflix: "start https://netflix.com",
+  primevideo: "start https://www.primevideo.com",
   spotify: "start spotify:",
   steam: "start steam:",
   vlc: "start vlc",

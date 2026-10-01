@@ -1,0 +1,16 @@
+{
+  "name": "nexus-e2e",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Tests navigateur end-to-end (Playwright) de la PWA Nexus Remote All.",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "install:browser": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "ws": "^8.18.0"
+  }
+}

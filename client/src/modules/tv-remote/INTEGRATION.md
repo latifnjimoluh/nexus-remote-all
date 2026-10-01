@@ -65,13 +65,9 @@ Power, GUIDE, CH.LIST, boutons couleur, INFO, TXT, ALL, FREE : sans équivalent 
 évident. Ils affichent un toast « à configurer ». Assigne-leur une commande dans
 `ACTIONS` quand tu veux les activer.
 
-### Cibles `launch:app` à compléter côté serveur (optionnel)
+### Cibles `launch:app` (whitelist serveur)
 
-`server/src/controllers/launcher.ts` possède une whitelist. **Prime Video**
-(`primevideo`) n'y est pas encore : ajoute une ligne pour l'activer, sinon le
-bouton est ignoré sans erreur.
-
-```ts
-// server/src/controllers/launcher.ts → const APPS
-primevideo: "start https://www.primevideo.com",
-```
+Toutes les cibles utilisées par la télécommande sont présentes dans la whitelist
+de `server/src/controllers/launcher.ts` : `netflix`, `youtube`, `primevideo`
+(ajouté), `chrome` (BROWSER), `vlc` (MEDIA), `spotify` (Music). Une cible absente
+est ignorée sans erreur.
