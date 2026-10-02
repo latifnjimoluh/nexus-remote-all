@@ -2,6 +2,7 @@ import * as Mouse from "../controllers/mouse.js";
 import * as Kbd from "../controllers/keyboard.js";
 import * as Media from "../controllers/media.js";
 import * as Sys from "../controllers/system.js";
+import * as Tv from "../controllers/tv.js";
 import { launch } from "../controllers/launcher.js";
 import { validateCommand } from "../validate.js";
 
@@ -57,6 +58,10 @@ export async function handleCommand(raw: unknown): Promise<void> {
       return Kbd.tap("Escape");
     case "slide:black":
       return Kbd.tap("B");
+
+    // --- Contrôle TV Direct ou Relais ---
+    case "tv:command":
+      return Tv.sendTvCommand(cmd.targetIp, cmd.action, cmd.value).then(() => {});
 
     // --- Identification / Handshake ---
     case "client:hello":

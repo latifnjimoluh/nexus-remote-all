@@ -5,6 +5,8 @@ import os from "node:os";
 import { CONFIG } from "../config.js";
 import { getLocalIp, localAddresses } from "../net.js";
 import { getClientDist } from "../state.js";
+import { getDiscoveredDevices, runNetworkScan } from "../discovery/scanner.js";
+import { sendTvCommand } from "../controllers/tv.js";
 
 export const pairingRouter = Router();
 
@@ -193,3 +195,34 @@ pairingRouter.post("/verify-pin", (req: Request, res: Response): void => {
     attemptsLeft: 5 - failedAttempts,
   });
 });
+
+/**
+ * Endpoint de découverte réseau : renvoie la liste en temps réel des PC Nexus
+ * et des Smart TVs (Hisense VIDAA, LG WebOS, Roku, DLNA) détectés sur le LAN.
+ */
+pairingRouter.get("/network-devices", async (req: Request, res: Response): Promise<void> => {
+  const refresh = req.query.refresh === "1" || req.query.refresh === "true";
+  if (refresh) {
+    await runNetworkScan();
+  }
+  const devices = await getDiscoveredDevices(refresh);
+  res.json({ ok: true, devices });
+});
+
+/**
+ * Relais de commandes vers les Smart TVs du réseau local (évite les restrictions CORS des navigateurs).
+ */
+pairingRouter.post("/tv/command", async (req: Request, res: Response): Promise<void> => {
+  const { targetIp, action, value } = req.body ?? {};
+  if (!targetIp || typeof targetIp !== "string" || !action || typeof action !== "string") {
+    res.status(400).json({ ok: false, error: "Paramètres targetIp et action requis." });
+    return;
+  }
+  try {
+    const result = await sendTvCommand(targetIp, action, value);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+

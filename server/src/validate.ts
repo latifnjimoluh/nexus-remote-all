@@ -70,6 +70,16 @@ export function validateCommand(raw: unknown): Command | null {
     case "slide:black":
       return { type: c.type } as Command;
 
+    case "tv:command":
+      if (!isStr(c.targetIp) || c.targetIp.length === 0 || c.targetIp.length > 64) return null;
+      if (!isStr(c.action) || c.action.length === 0 || c.action.length > 32) return null;
+      return {
+        type: "tv:command",
+        targetIp: c.targetIp,
+        action: c.action,
+        value: c.value,
+      };
+
     case "client:hello":
       return {
         type: "client:hello",

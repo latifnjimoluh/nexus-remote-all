@@ -24,3 +24,7 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 .idea/
+
+# Tests
+test-results/
+playwright-report/

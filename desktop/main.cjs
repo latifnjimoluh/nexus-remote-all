@@ -12,8 +12,18 @@ function log(...args) {
   try {
     fs.appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${args.map(a => typeof a === "object" ? JSON.stringify(a) : a).join(" ")}\n`);
   } catch {}
-  console.log(...args);
 }
+
+const origLog = console.log;
+const origErr = console.error;
+console.log = (...args) => {
+  log(...args);
+  origLog(...args);
+};
+console.error = (...args) => {
+  log("[STDERR]", ...args);
+  origErr(...args);
+};
 
 process.on("uncaughtException", (err) => {
   log("UNCAUGHT EXCEPTION:", err.stack || err);

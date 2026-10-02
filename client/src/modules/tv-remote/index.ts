@@ -1,15 +1,20 @@
 /**
  * Module « TV Remote » — reproduction fidèle de la télécommande Hisense VIDAA.
  *
- * Isolé volontairement : styles préfixés `tvr-` injectés une seule fois, aucune
- * dépendance aux autres modules. Pour l'activer dans l'app, voir INTEGRATION.md.
- *
- * Chaque touche est reliée à une vraie commande PC via la table ACTIONS ci-dessous.
- * Les boutons purement « TV » sans équivalent PC (Power, GUIDE, couleurs…) sont
- * des placeholders (`cmd: null`) : ils affichent un toast et attendent un mappage.
+ * Supporte le double ciblage :
+ * 1. Mode PC : pilote le PC connecté (touches multimédia, raccourcis, lanceurs d'apps).
+ * 2. Mode Smart TV : pilote directement les Smart TVs détectées sur le réseau (Hisense VIDAA, Roku, UPnP/DLNA).
  */
 import { send } from "../../core/ws-client";
 import { tapFeedback } from "../../core/haptics";
+import {
+  getActiveRemoteTarget,
+  setActiveRemoteTarget,
+  onTargetChange,
+  fetchNetworkDevices,
+  sendTvCommand,
+  type NetworkDevice,
+} from "../../core/discovery";
 import type { Command } from "@shared/protocol";
 
 interface Action {
@@ -21,7 +26,7 @@ interface Action {
   hz?: number;
 }
 
-/** Table de mappage bouton → commande PC. Modifiable en un seul endroit. */
+/** Table de mappage bouton → commande PC. */
 const ACTIONS: Record<string, Action> = {
   // Alimentation & entrées
   power: { cmd: null, label: "Alimentation", hz: 800 },
@@ -39,14 +44,14 @@ const ACTIONS: Record<string, Action> = {
   "num-8": { cmd: { type: "key:tap", key: "Num8" }, label: "8" },
   "num-9": { cmd: { type: "key:tap", key: "Num9" }, label: "9" },
   "num-0": { cmd: { type: "key:tap", key: "Num0" }, label: "0" },
-  guide: { cmd: null, label: "Guide" },
-  chlist: { cmd: null, label: "Liste des chaînes" },
+  guide: { cmd: { type: "key:combo", keys: ["LeftControl", "LeftShift", "Escape"] }, label: "Guide (Gestionnaire)" },
+  chlist: { cmd: { type: "key:combo", keys: ["LeftAlt", "Tab"] }, label: "Liste des fenêtres" },
 
-  // Boutons couleur (télétexte) — placeholders
-  "color-red": { cmd: null, label: "Rouge" },
-  "color-green": { cmd: null, label: "Vert" },
-  "color-yellow": { cmd: null, label: "Jaune" },
-  "color-blue": { cmd: null, label: "Bleu" },
+  // Boutons couleur (télétexte / fonctions)
+  "color-red": { cmd: { type: "key:tap", key: "F1" }, label: "Aide (F1)" },
+  "color-green": { cmd: { type: "key:tap", key: "F2" }, label: "Renommer (F2)" },
+  "color-yellow": { cmd: { type: "key:tap", key: "F3" }, label: "Recherche (F3)" },
+  "color-blue": { cmd: { type: "key:tap", key: "F4" }, label: "F4" },
 
   // Média
   play: { cmd: { type: "media:key", key: "play" }, label: "Lecture/Pause", hz: 1450 },
@@ -63,9 +68,9 @@ const ACTIONS: Record<string, Action> = {
   exit: { cmd: { type: "media:key", key: "back" }, label: "Quitter", hz: 1000 },
   back: { cmd: { type: "key:tap", key: "Backspace" }, label: "Retour", hz: 1100 },
   return: { cmd: { type: "key:combo", keys: ["LeftAlt", "ArrowLeft"] }, label: "Précédent", hz: 1050 },
-  info: { cmd: null, label: "Info" },
+  info: { cmd: { type: "key:combo", keys: ["LeftSuper", "G"] }, label: "Infos système (Game Bar)" },
   subtitle: { cmd: { type: "key:tap", key: "C" }, label: "Sous-titres", hz: 1150 },
-  txt: { cmd: null, label: "Télétexte" },
+  txt: { cmd: { type: "launch:app", target: "notepad" }, label: "Bloc-notes" },
 
   // Bascules chaîne / volume
   "ch-up": { cmd: { type: "key:tap", key: "PageUp" }, label: "Chaîne +", hz: 1400 },
@@ -74,8 +79,8 @@ const ACTIONS: Record<string, Action> = {
   "vol-down": { cmd: { type: "media:key", key: "voldown" }, label: "Volume −", hz: 1000 },
 
   // Applications
-  "app-all": { cmd: null, label: "Toutes les apps" },
-  "app-free": { cmd: null, label: "VIDAA Free" },
+  "app-all": { cmd: { type: "key:combo", keys: ["LeftSuper", "Tab"] }, label: "Toutes les apps" },
+  "app-free": { cmd: { type: "launch:app", target: "chrome" }, label: "Streaming Web" },
   "app-netflix": { cmd: { type: "launch:app", target: "netflix" }, label: "Netflix", hz: 1300 },
   "app-youtube": { cmd: { type: "launch:app", target: "youtube" }, label: "YouTube", hz: 1300 },
   "app-prime": { cmd: { type: "launch:app", target: "primevideo" }, label: "Prime Video", hz: 1300 },
@@ -90,10 +95,52 @@ function injectStyles(): void {
   const style = document.createElement("style");
   style.id = "tvr-styles";
   style.textContent = `
+  .tvr-wrapper {
+    display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 330px; margin: 0 auto; gap: 8px;
+  }
+  .tvr-target-bar {
+    width: 100%; box-sizing: border-box; background: rgba(25, 25, 33, 0.75); backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 20px; padding: 7px 12px;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35); user-select: none;
+  }
+  .tvr-target-info {
+    display: flex; align-items: center; gap: 8px; min-width: 0;
+  }
+  .tvr-target-icon {
+    font-size: 1.25rem; shrink: 0;
+  }
+  .tvr-target-text {
+    display: flex; flex-direction: column; line-height: 1.15; min-width: 0;
+  }
+  .tvr-target-title {
+    font-size: 0.75rem; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 135px;
+  }
+  .tvr-target-sub {
+    font-size: 0.62rem; color: #9a9ba6; font-mono;
+  }
+  .tvr-target-actions {
+    display: flex; align-items: center; gap: 6px; shrink: 0;
+  }
+  .tvr-target-btn {
+    background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #d9dae2; font-size: 0.68rem; font-weight: 700; padding: 5px 9px; border-radius: 12px;
+    cursor: pointer; transition: all 0.15s ease; display: flex; align-items: center; gap: 4px;
+  }
+  .tvr-target-btn:hover {
+    background: rgba(109, 94, 252, 0.3); border-color: rgba(109, 94, 252, 0.6); color: #fff;
+  }
+  .tvr-target-btn:active {
+    transform: scale(0.96);
+  }
+  .tvr-target-scan {
+    padding: 5px 8px; font-size: 0.8rem;
+  }
+
   .tvr-remote {
     --tvr-top:#3b3b42; --tvr-bot:#23232a; --tvr-edge:rgba(255,255,255,.07);
     --tvr-ink:#d9dae2; --tvr-dim:#9a9ba6;
-    width:312px; max-width:100%; margin:4px auto 18px; padding:20px 20px 22px;
+    width:312px; max-width:100%; margin:2px auto 18px; padding:18px 20px 22px;
     background:linear-gradient(160deg,#2c2c32 0%,#1a1a1f 42%,#202026 100%);
     border-radius:46px; border:1px solid rgba(255,255,255,.06); position:relative;
     box-shadow:0 2px 1px rgba(255,255,255,.10) inset,0 -20px 40px rgba(0,0,0,.35) inset,0 30px 60px rgba(0,0,0,.55),0 8px 18px rgba(0,0,0,.4);
@@ -183,10 +230,59 @@ function toast(msg: string): void {
   toastEl.textContent = msg;
   toastEl.classList.add("show");
   window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => toastEl?.classList.remove("show"), 1600);
+  toastTimer = window.setTimeout(() => toastEl?.classList.remove("show"), 1800);
 }
 
-function handle(act: string): void {
+async function handle(act: string): Promise<void> {
+  const target = getActiveRemoteTarget();
+
+  // Si le mode actif est Smart TV et qu'une TV est sélectionnée
+  if (target.mode === "tv" && target.device) {
+    tapFeedback(14, 1200);
+    const tv = target.device;
+
+    const actionMap: Record<string, { action: string; value?: unknown; label: string }> = {
+      power: { action: "power", label: "Alimentation" },
+      source: { action: "source", label: "Source" },
+      mute: { action: "mute", label: "Muet" },
+      play: { action: "play", label: "Lecture/Pause" },
+      "vol-up": { action: "volup", label: "Volume +" },
+      "vol-down": { action: "voldown", label: "Volume −" },
+      "ch-up": { action: "channel_up", label: "Chaîne +" },
+      "ch-down": { action: "channel_down", label: "Chaîne −" },
+      up: { action: "up", label: "Haut" },
+      down: { action: "down", label: "Bas" },
+      left: { action: "left", label: "Gauche" },
+      right: { action: "right", label: "Droite" },
+      ok: { action: "ok", label: "OK" },
+      exit: { action: "back", label: "Quitter" },
+      back: { action: "back", label: "Retour" },
+      return: { action: "back", label: "Précédent" },
+      menu: { action: "menu", label: "Menu" },
+      guide: { action: "guide", label: "Guide TV" },
+      chlist: { action: "chlist", label: "Liste chaînes" },
+      "app-netflix": { action: "app", value: "netflix", label: "Netflix" },
+      "app-youtube": { action: "app", value: "youtube", label: "YouTube" },
+      "app-prime": { action: "app", value: "primevideo", label: "Prime Video" },
+      "app-browser": { action: "app", value: "browser", label: "Navigateur" },
+      "app-media": { action: "app", value: "media", label: "Lecteur Média" },
+      "app-music": { action: "app", value: "spotify", label: "Musique" },
+      "app-all": { action: "home", label: "Accueil TV" },
+      "app-free": { action: "app", value: "free", label: "VIDAA Free" },
+    };
+
+    const tvAct = actionMap[act];
+    if (tvAct) {
+      toast(`📺 ${tv.name} : ${tvAct.label}…`);
+      const res = await sendTvCommand(tv.ip, tvAct.action, tvAct.value);
+      if (res.message) {
+        toast(`📺 ${tv.name} : ${res.message}`);
+      }
+      return;
+    }
+  }
+
+  // Mode PC (ou mode par défaut)
   const a = ACTIONS[act];
   if (!a) return;
   tapFeedback(14, a.hz ?? 1200);
@@ -199,6 +295,67 @@ function handle(act: string): void {
 
 export function renderTvRemote(root: HTMLElement): void {
   injectStyles();
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "tvr-wrapper";
+
+  // Barre sélecteur de cible (PC Hôte vs Smart TV détectée)
+  const targetBar = document.createElement("div");
+  targetBar.className = "tvr-target-bar";
+
+  const renderTargetBar = () => {
+    const target = getActiveRemoteTarget();
+    const isTv = target.mode === "tv" && !!target.device;
+    const title = isTv ? target.device!.name : "PC Hôte (Multimédia)";
+    const sub = isTv ? `${target.device!.brand || "Smart TV"} • ${target.device!.ip}` : "Contrôle direct du PC";
+    const icon = isTv ? "📺" : "🖥️";
+
+    targetBar.innerHTML = `
+      <div class="tvr-target-info">
+        <span class="tvr-target-icon">${icon}</span>
+        <div class="tvr-target-text">
+          <span class="tvr-target-title">${title}</span>
+          <span class="tvr-target-sub">${sub}</span>
+        </div>
+      </div>
+      <div class="tvr-target-actions">
+        <button class="tvr-target-btn" id="tvr-switch-btn" title="Basculer de cible">
+          ${isTv ? "🖥️ Mode PC" : "📺 Mode TV"}
+        </button>
+        <button class="tvr-target-btn tvr-target-scan" id="tvr-scan-btn" title="Rechercher des appareils">
+          📡
+        </button>
+      </div>
+    `;
+
+    targetBar.querySelector("#tvr-switch-btn")?.addEventListener("click", async () => {
+      tapFeedback(12);
+      if (target.mode === "tv") {
+        setActiveRemoteTarget("pc");
+        toast("🖥️ Mode PC sélectionné");
+      } else {
+        // Tente de trouver une Smart TV
+        const devs = await fetchNetworkDevices();
+        const tvs = devs.filter((d) => d.type === "tv");
+        if (tvs.length > 0) {
+          const chosen = tvs[0];
+          setActiveRemoteTarget("tv", chosen);
+          toast(`📺 Cible : ${chosen.name}`);
+        } else {
+          toast("🔍 Aucune TV détectée. Ouverture du scan réseau…");
+          window.dispatchEvent(new CustomEvent("nexus:open-network-devices"));
+        }
+      }
+    });
+
+    targetBar.querySelector("#tvr-scan-btn")?.addEventListener("click", () => {
+      tapFeedback(12);
+      window.dispatchEvent(new CustomEvent("nexus:open-network-devices"));
+    });
+  };
+
+  renderTargetBar();
+  const unsubTarget = onTargetChange(() => renderTargetBar());
 
   const remote = document.createElement("div");
   remote.className = "tvr-remote";
@@ -289,8 +446,18 @@ export function renderTvRemote(root: HTMLElement): void {
 
   remote.addEventListener("click", (e) => {
     const target = (e.target as HTMLElement).closest<HTMLElement>("[data-act]");
-    if (target) handle(target.getAttribute("data-act")!);
+    if (target) void handle(target.getAttribute("data-act")!);
   });
 
-  root.appendChild(remote);
+  wrapper.append(targetBar, remote);
+  root.appendChild(wrapper);
+
+  // Nettoyage lors du démontage
+  const observer = new MutationObserver(() => {
+    if (!document.contains(wrapper)) {
+      unsubTarget();
+      observer.disconnect();
+    }
+  });
+  observer.observe(root, { childList: true });
 }

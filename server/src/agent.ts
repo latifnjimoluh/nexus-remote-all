@@ -8,6 +8,7 @@ import { handleCommand } from "./ws/router.js";
 import { verifyToken, revokeToken } from "./auth/middleware.js";
 import { pairingRouter, createPairingInfo, refreshActivePin } from "./auth/pairing.js";
 import { publishService } from "./discovery/mdns.js";
+import { runNetworkScan } from "./discovery/scanner.js";
 import { startRelayClient } from "./relay-client.js";
 import { getLocalIp, localAddresses } from "./net.js";
 import { setClientDist, getClientDist } from "./state.js";
@@ -128,7 +129,7 @@ export async function startAgent(options: AgentOptions = {}): Promise<AgentHandl
 
   app.use("/pair", pairingRouter);
 
-  const httpServer = app.listen(CONFIG.HTTP_PORT, () => {
+  const httpServer = app.listen(CONFIG.HTTP_PORT, "0.0.0.0", () => {
     say(`HTTP  → http://0.0.0.0:${CONFIG.HTTP_PORT}`);
   });
   httpServer.on("error", (err) => {
@@ -140,6 +141,7 @@ export async function startAgent(options: AgentOptions = {}): Promise<AgentHandl
   // ───────────────────────────────────────────────────────────
   const wss = new WebSocketServer({
     port: CONFIG.WS_PORT,
+    host: "0.0.0.0",
     // Défense anti-flood : une commande/enveloppe fait quelques Ko au plus.
     maxPayload: 64 * 1024,
     verifyClient: (info, callback) => {
@@ -287,9 +289,10 @@ export async function startAgent(options: AgentOptions = {}): Promise<AgentHandl
   });
 
   // ───────────────────────────────────────────────────────────
-  //  Services Réseau : mDNS Local + Relais Cloud à Code PIN
+  //  Services Réseau : mDNS Local + Découverte Smart TVs + Relais Cloud
   // ───────────────────────────────────────────────────────────
   publishService();
+  void runNetworkScan();
 
   const cloud =
     options.enableCloud ??

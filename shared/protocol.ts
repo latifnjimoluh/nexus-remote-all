@@ -27,6 +27,8 @@ export type Command =
   | { type: "slide:start" }
   | { type: "slide:end" }
   | { type: "slide:black" }
+  // --- Contrôle TV (Direct ou Relais Réseau) ---
+  | { type: "tv:command"; targetIp: string; action: string; value?: unknown }
   // --- Handshake & Identification du client ---
   | { type: "client:hello"; name?: string; device?: string };
 

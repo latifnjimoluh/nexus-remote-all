@@ -1,6 +1,8 @@
 /**
- * Module d'auto-détection et d'appairage par code PIN style Bluetooth sur le réseau local (LAN).
+ * Module d'auto-détection, gestion des appareils du réseau (PC & Smart TVs),
+ * et appairage par code PIN style Bluetooth sur le réseau local (LAN).
  */
+import { send } from "./ws-client";
 
 export interface DiscoveredHost {
   ip: string;
@@ -10,6 +12,68 @@ export interface DiscoveredHost {
   service: string;
   version: string;
   lastSeen: number;
+}
+
+export interface NetworkDevice {
+  id: string;
+  name: string;
+  ip: string;
+  type: "pc" | "tv";
+  brand?: string;
+  model?: string;
+  isCurrent?: boolean;
+  protocol?: "upnp" | "roku" | "nexus" | "vidaa";
+  controlUrl?: string;
+  avtUrl?: string;
+  httpPort?: number;
+  wsPort?: number;
+  lastSeen?: number;
+}
+
+export type RemoteTargetMode = "pc" | "tv";
+
+export interface ActiveRemoteTarget {
+  mode: RemoteTargetMode;
+  device?: NetworkDevice | null;
+}
+
+let activeTarget: ActiveRemoteTarget = {
+  mode: (localStorage.getItem("nexus.target_mode") as RemoteTargetMode) || "pc",
+  device: (() => {
+    try {
+      const raw = localStorage.getItem("nexus.selected_tv");
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  })(),
+};
+
+const targetListeners: Array<(target: ActiveRemoteTarget) => void> = [];
+
+export function getActiveRemoteTarget(): ActiveRemoteTarget {
+  return activeTarget;
+}
+
+export function setActiveRemoteTarget(mode: RemoteTargetMode, device?: NetworkDevice | null): void {
+  activeTarget = { mode, device: device ?? null };
+  localStorage.setItem("nexus.target_mode", mode);
+  if (device) {
+    localStorage.setItem("nexus.selected_tv", JSON.stringify(device));
+  }
+  for (const listener of targetListeners) {
+    try {
+      listener(activeTarget);
+    } catch {}
+  }
+}
+
+export function onTargetChange(listener: (target: ActiveRemoteTarget) => void): () => void {
+  targetListeners.push(listener);
+  return () => {
+    const idx = targetListeners.indexOf(listener);
+    if (idx !== -1) targetListeners.splice(idx, 1);
+  };
 }
 
 /** Tente d'interroger un hôte spécifique sur le port 4700 pour vérifier s'il s'agit d'un agent Nexus. */
@@ -38,6 +102,89 @@ export async function probeHost(ip: string, port = 4700): Promise<DiscoveredHost
   return null;
 }
 
+/** Récupère la liste complète des appareils découverts (PC & Smart TVs) auprès de l'agent */
+export async function fetchNetworkDevices(host?: string, refresh = false): Promise<NetworkDevice[]> {
+  const targetHost =
+    host ||
+    localStorage.getItem("nexus.host") ||
+    (location.hostname !== "localhost" && /^\d+\.\d+\.\d+\.\d+$/.test(location.hostname) ? location.hostname : "127.0.0.1");
+
+  const httpPort = location.port && /^\d+$/.test(location.port) ? location.port : "4700";
+
+  try {
+    const res = await fetch(`http://${targetHost}:${httpPort}/pair/network-devices?refresh=${refresh ? "1" : "0"}`, {
+      mode: "cors",
+      cache: "no-store",
+      signal: AbortSignal.timeout(3500),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.ok && Array.isArray(data.devices)) {
+        return data.devices;
+      }
+    }
+  } catch {}
+
+  // Repli : scan local direct depuis le navigateur
+  const fallbackList: NetworkDevice[] = [];
+  const hosts = await scanLocalNetwork(() => {});
+  for (const h of hosts) {
+    fallbackList.push({
+      id: h.ip,
+      name: h.hostname,
+      ip: h.ip,
+      type: "pc",
+      brand: "Nexus",
+      model: h.version,
+      httpPort: h.httpPort,
+      wsPort: h.wsPort,
+      lastSeen: h.lastSeen,
+    });
+  }
+  return fallbackList;
+}
+
+/**
+ * Envoie une commande TV soit via le WebSocket (si ouvert), soit par relais HTTP
+ */
+export async function sendTvCommand(
+  targetIp: string,
+  action: string,
+  value?: unknown,
+): Promise<{ ok: boolean; message?: string; volume?: number; mute?: boolean }> {
+  // 1. Envoi via WebSocket (canal ultra-rapide)
+  try {
+    send({
+      type: "tv:command",
+      targetIp,
+      action,
+      value,
+    });
+  } catch {}
+
+  // 2. Relais HTTP direct vers l'agent hôte
+  const host =
+    localStorage.getItem("nexus.host") ||
+    (location.hostname !== "localhost" && /^\d+\.\d+\.\d+\.\d+$/.test(location.hostname) ? location.hostname : "127.0.0.1");
+
+  const httpPort = location.port && /^\d+$/.test(location.port) ? location.port : "4700";
+
+  try {
+    const res = await fetch(`http://${host}:${httpPort}/pair/tv/command`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetIp, action, value }),
+      mode: "cors",
+      signal: AbortSignal.timeout(2500),
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch {}
+
+  return { ok: true, message: `Action ${action} transmise` };
+}
+
 /**
  * Scanne le réseau local pour trouver automatiquement tous les PC hôtes Nexus actifs.
  * Appelle onFound dès qu'un appareil est détecté en temps réel.
@@ -56,7 +203,7 @@ export async function scanLocalNetwork(
     }
   };
 
-  // 1. Vérification prioritaire : hôte actuel (si ouvert directement depuis le navigateur du téléphone)
+  // 1. Vérification prioritaire : hôte actuel
   const currentHost = location.hostname;
   if (
     currentHost &&
@@ -86,17 +233,12 @@ export async function scanLocalNetwork(
     subnetBase = `${parts[0]}.${parts[1]}.${parts[2]}.`;
   }
 
-  // 4. Liste de sondage ciblée sur les adresses IP les plus probables (routeur, DHCP 2-50, 100-150, 180-220)
+  // 4. Liste de sondage ciblée sur les adresses IP les plus probables
   const targets: string[] = [];
-  
-  // Plage DHCP basse (2-30)
   for (let i = 2; i <= 30; i++) targets.push(`${subnetBase}${i}`);
-  // Plage DHCP moyenne (100-130)
   for (let i = 100; i <= 130; i++) targets.push(`${subnetBase}${i}`);
-  // Plage DHCP haute (170-210)
   for (let i = 170; i <= 210; i++) targets.push(`${subnetBase}${i}`);
 
-  // Découverte en rafale parallèle (lots de 15 requêtes simultanées)
   const BATCH_SIZE = 15;
   for (let i = 0; i < targets.length; i += BATCH_SIZE) {
     const batch = targets.slice(i, i + BATCH_SIZE);

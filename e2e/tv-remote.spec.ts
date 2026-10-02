@@ -49,6 +49,19 @@ test.beforeAll(async () => {
   httpServer = createServer(async (req, res) => {
     try {
       const urlPath = decodeURIComponent((req.url ?? "/").split("?")[0]);
+      if (urlPath === "/pair/network-devices") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: true,
+            devices: [
+              { id: "127.0.0.1", name: "PC Nexus Test", ip: "127.0.0.1", type: "pc", isCurrent: true },
+              { id: "192.168.1.194", name: "Hisense VIDAA TV", ip: "192.168.1.194", type: "tv", brand: "Hisense" },
+            ],
+          }),
+        );
+        return;
+      }
       let filePath = join(DIST, urlPath === "/" ? "index.html" : urlPath);
       if (!existsSync(filePath)) filePath = join(DIST, "index.html");
       const body = await readFile(filePath);
@@ -135,3 +148,36 @@ test("un bouton placeholder n'envoie aucune commande (toast « à configurer »)
   expect(received.length).toBe(before);
   await expect(page.locator(".tvr-toast.show")).toBeVisible();
 });
+
+test("le volet appareils réseau détecte les Smart TVs et bascule la télécommande", async ({ page }) => {
+  await page.goto(
+    `http://127.0.0.1:${HTTP_PORT}/?host=127.0.0.1&ws=${WS_PORT}&token=TESTTOKEN`,
+  );
+  await expect.poll(() => received.some((m) => m.type === "client:hello")).toBe(true);
+
+  // 1. Ouvre le volet appareils réseau depuis le bouton d'en-tête
+  await page.locator('[title*="Appareils"]').click();
+  await expect(page.locator("#nexus-network-modal")).toBeVisible();
+  await expect(page.getByText("Hisense VIDAA TV")).toBeVisible();
+
+  // 2. Clique sur "Piloter" pour la Smart TV Hisense
+  await page.locator(".net-action-btn", { hasText: "Piloter" }).click();
+  await expect(page.locator("#nexus-network-modal")).not.toBeVisible();
+
+  // 3. Vérifie que la télécommande est en mode TV sur Hisense VIDAA
+  await expect(page.locator(".tvr-target-title")).toContainText("Hisense VIDAA TV");
+  await expect(page.locator("#tvr-switch-btn")).toContainText("Mode PC");
+
+  // 4. Clique sur Volume + : doit émettre tv:command vers la TV
+  await page.locator('[data-act="vol-up"]').click();
+  await expect
+    .poll(
+      () =>
+        received.some(
+          (m) => m.type === "tv:command" && m.targetIp === "192.168.1.194" && m.action === "volup",
+        ),
+      { timeout: 5000 },
+    )
+    .toBe(true);
+});
+

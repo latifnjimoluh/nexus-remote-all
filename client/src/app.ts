@@ -13,7 +13,11 @@ import {
   scanLocalNetwork,
   probeHost,
   pairWithPin,
+  fetchNetworkDevices,
+  setActiveRemoteTarget,
+  getActiveRemoteTarget,
   type DiscoveredHost,
+  type NetworkDevice,
 } from "./core/discovery";
 import { renderTrackpad } from "./modules/trackpad";
 import { renderMedia } from "./modules/media";
@@ -75,6 +79,7 @@ function mountConnect(root: HTMLElement): void {
 
   let activeTab: "lan" | "cloud" | "manual" = "lan";
   let discovered: DiscoveredHost[] = [];
+  let discoveredTvs: NetworkDevice[] = [];
   let isScanning = false;
   let selectedDevice: DiscoveredHost | null = null;
 
@@ -242,6 +247,53 @@ function mountConnect(root: HTMLElement): void {
     }
 
     wrap.appendChild(listWrap);
+
+    // Section Smart TVs détectées
+    if (discoveredTvs.length > 0) {
+      const tvSection = document.createElement("div");
+      tvSection.className = "flex flex-col gap-2 pt-2 border-t border-white/5";
+      tvSection.innerHTML = `
+        <div class="flex items-center gap-1.5 px-1 text-xs text-amber-300 font-semibold">
+          <span>📺</span>
+          <span>Smart TVs détectées (${discoveredTvs.length})</span>
+        </div>
+      `;
+      const tvList = document.createElement("div");
+      tvList.className = "flex flex-col gap-2";
+
+      discoveredTvs.forEach((tv) => {
+        const item = document.createElement("div");
+        item.className =
+          "p-3 rounded-2xl bg-white/5 border border-white/10 hover:border-amber-400/50 flex items-center justify-between gap-2 transition cursor-pointer group shadow-sm active:scale-[0.99]";
+        item.innerHTML = `
+          <div class="flex items-center gap-2.5 min-w-0">
+            <div class="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-base shrink-0 group-hover:bg-amber-500 transition">
+              📺
+            </div>
+            <div class="flex flex-col min-w-0 leading-tight">
+              <span class="text-xs font-bold text-white truncate flex items-center gap-1.5">
+                ${tv.name}
+              </span>
+              <span class="text-[10px] font-mono text-nexus-muted">${tv.ip} • ${tv.brand || "Smart TV"}</span>
+            </div>
+          </div>
+          <button class="shrink-0 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-[11px] font-bold shadow-md transition flex items-center gap-1">
+            <span>Télécommande</span>
+            <span>🎮</span>
+          </button>
+        `;
+        item.onclick = () => {
+          tapFeedback(15);
+          setActiveRemoteTarget("tv", tv);
+          localStorage.setItem("nexus.host", tv.ip);
+          mountShell(root);
+        };
+        tvList.appendChild(item);
+      });
+
+      tvSection.appendChild(tvList);
+      wrap.appendChild(tvSection);
+    }
 
     // Formulaire rapide par IP si la détection automatique échoue
     const manualIpBox = document.createElement("div");
@@ -532,6 +584,26 @@ function mountConnect(root: HTMLElement): void {
     renderView();
 
     try {
+      fetchNetworkDevices(undefined, true)
+        .then((devs) => {
+          discoveredTvs = devs.filter((d) => d.type === "tv");
+          for (const d of devs) {
+            if (d.type === "pc" && !discovered.some((x) => x.ip === d.ip)) {
+              discovered.push({
+                ip: d.ip,
+                hostname: d.name,
+                httpPort: d.httpPort || 4700,
+                wsPort: d.wsPort || 4701,
+                service: "Nexus Remote All",
+                version: d.model || "0.5.0",
+                lastSeen: d.lastSeen || Date.now(),
+              });
+            }
+          }
+          renderView();
+        })
+        .catch(() => {});
+
       await scanLocalNetwork((device) => {
         // Ajout en direct sans doublons
         if (!discovered.some((d) => d.ip === device.ip)) {
@@ -610,12 +682,252 @@ function showDisconnectOverlay(root: HTMLElement): void {
   root.appendChild(overlay);
 }
 
+/** Tiroir / Modal moderne Dark Glassmorphism listant tous les appareils du réseau local (PC & Smart TVs) */
+function openNetworkDevicesModal(
+  root: HTMLElement,
+  switchTab?: (tabId: string) => void,
+): void {
+  const existing = document.getElementById("nexus-network-modal");
+  if (existing) existing.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "nexus-network-modal";
+  overlay.className =
+    "fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fadeIn select-none";
+
+  const card = document.createElement("div");
+  card.className =
+    "glass-panel-elevated w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-5 border border-white/10 shadow-2xl flex flex-col gap-3.5 max-h-[88vh] overflow-hidden";
+
+  let devices: NetworkDevice[] = [];
+  let filter: "all" | "pc" | "tv" = "all";
+  let isLoading = false;
+
+  async function loadDevices(forceRefresh = false) {
+    isLoading = true;
+    render();
+    try {
+      devices = await fetchNetworkDevices(undefined, forceRefresh);
+    } catch {
+      devices = [];
+    } finally {
+      isLoading = false;
+      render();
+    }
+  }
+
+  function render() {
+    card.innerHTML = "";
+
+    // 1. En-tête
+    const head = document.createElement("div");
+    head.className = "flex items-center justify-between pb-2.5 border-b border-white/5";
+    head.innerHTML = `
+      <div class="flex items-center gap-2.5">
+        <div class="w-9 h-9 rounded-xl bg-nexus-accent/20 border border-nexus-accent/40 flex items-center justify-center text-lg shadow-[0_0_12px_rgba(109,94,252,0.3)]">
+          📡
+        </div>
+        <div>
+          <h2 class="text-sm font-bold text-white leading-tight">Appareils du Réseau</h2>
+          <p class="text-[10px] text-nexus-muted mt-0.5">PC hôtes & Smart TVs connectées</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <button id="net-refresh-btn" class="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-nexus-muted hover:text-white transition border border-white/5 ${isLoading ? "animate-spin text-nexus-accent" : ""}" title="Actualiser le scan">
+          🔄
+        </button>
+        <button id="net-close-btn" class="p-1.5 rounded-xl bg-white/5 hover:bg-rose-500/20 text-xs text-nexus-muted hover:text-rose-300 transition border border-white/5" title="Fermer">
+          ✕
+        </button>
+      </div>
+    `;
+
+    head.querySelector("#net-refresh-btn")?.addEventListener("click", () => {
+      tapFeedback(10);
+      loadDevices(true);
+    });
+    head.querySelector("#net-close-btn")?.addEventListener("click", () => {
+      tapFeedback(10);
+      overlay.remove();
+    });
+
+    // 2. Filtres
+    const pcs = devices.filter((d) => d.type === "pc");
+    const tvs = devices.filter((d) => d.type === "tv");
+
+    const filterBar = document.createElement("div");
+    filterBar.className = "flex p-1 bg-white/5 rounded-2xl border border-white/5 text-[11px] font-bold";
+    filterBar.innerHTML = `
+      <button class="flex-1 py-1.5 rounded-xl transition ${filter === "all" ? "bg-nexus-accent text-white shadow-sm" : "text-nexus-muted hover:text-white"}" data-f="all">
+        Tous (${devices.length})
+      </button>
+      <button class="flex-1 py-1.5 rounded-xl transition ${filter === "pc" ? "bg-nexus-accent text-white shadow-sm" : "text-nexus-muted hover:text-white"}" data-f="pc">
+        🖥️ PC (${pcs.length})
+      </button>
+      <button class="flex-1 py-1.5 rounded-xl transition ${filter === "tv" ? "bg-nexus-accent text-white shadow-sm" : "text-nexus-muted hover:text-white"}" data-f="tv">
+        📺 Smart TV (${tvs.length})
+      </button>
+    `;
+
+    filterBar.querySelectorAll("[data-f]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        filter = (e.currentTarget as HTMLElement).getAttribute("data-f") as any;
+        render();
+      });
+    });
+
+    // 3. Liste scrollable des appareils
+    const list = document.createElement("div");
+    list.className = "flex flex-col gap-2 overflow-y-auto no-scrollbar max-h-[50vh] pr-0.5";
+
+    const filtered = devices.filter((d) => (filter === "all" ? true : d.type === filter));
+
+    if (isLoading && filtered.length === 0) {
+      list.innerHTML = `
+        <div class="py-10 flex flex-col items-center justify-center gap-2.5 text-center">
+          <div class="w-8 h-8 rounded-full border-2 border-nexus-accent border-t-transparent animate-spin"></div>
+          <span class="text-xs text-slate-200 font-medium">Détection des appareils sur le réseau local…</span>
+          <span class="text-[10px] text-nexus-muted">Recherche SSDP UPnP (Hisense VIDAA, Roku, LG) et hôtes Nexus</span>
+        </div>
+      `;
+    } else if (filtered.length === 0) {
+      list.innerHTML = `
+        <div class="py-8 px-4 rounded-2xl border border-dashed border-white/10 text-center flex flex-col items-center gap-1.5 bg-white/[0.02]">
+          <span class="text-2xl opacity-60">🔍</span>
+          <span class="text-xs text-slate-300 font-medium">Aucun appareil détecté</span>
+          <span class="text-[10px] text-nexus-muted">Assurez-vous d'être connecté au même réseau Wi-Fi local.</span>
+        </div>
+      `;
+    } else {
+      for (const dev of filtered) {
+        const item = document.createElement("div");
+        item.className =
+          "p-3 rounded-2xl bg-white/5 border border-white/10 hover:border-nexus-accent/50 transition flex items-center justify-between gap-3 shadow-sm";
+
+        const isTv = dev.type === "tv";
+        const icon = isTv ? "📺" : "🖥️";
+        const brandBadge = dev.brand
+          ? `<span class="px-1.5 py-0.5 rounded-md bg-white/10 text-[9px] font-mono font-bold text-slate-300 uppercase">${dev.brand}</span>`
+          : "";
+
+        item.innerHTML = `
+          <div class="flex items-center gap-2.5 min-w-0">
+            <div class="w-10 h-10 rounded-xl ${isTv ? "bg-amber-500/20 border-amber-500/30 text-amber-300" : "bg-nexus-accent/20 border-nexus-accent/30 text-nexus-accent"} border flex items-center justify-center text-xl shrink-0">
+              ${icon}
+            </div>
+            <div class="flex flex-col min-w-0 leading-tight">
+              <div class="flex items-center gap-1.5">
+                <span class="text-xs font-bold text-white truncate">${dev.name}</span>
+                ${dev.isCurrent ? `<span class="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[9px] font-bold border border-emerald-500/30">Connecté</span>` : ""}
+              </div>
+              <div class="flex items-center gap-1.5 text-[10px] text-nexus-muted mt-1">
+                <span class="font-mono text-slate-400">${dev.ip}</span>
+                ${brandBadge}
+                ${dev.model ? `<span class="truncate text-[9px] text-slate-500 max-w-[80px]">${dev.model}</span>` : ""}
+              </div>
+            </div>
+          </div>
+          <div class="shrink-0 flex items-center gap-1.5">
+            ${
+              isTv
+                ? `<button class="net-action-btn px-3 py-1.5 rounded-xl bg-nexus-accent hover:bg-nexus-accent-hover text-white text-[11px] font-bold shadow-md transition flex items-center gap-1">
+                     <span>🎮 Piloter</span>
+                   </button>`
+                : dev.isCurrent
+                ? `<span class="text-xs text-emerald-400 font-bold px-2 py-1">Hôte Actif</span>`
+                : `<button class="net-action-btn px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-[11px] font-bold transition flex items-center gap-1">
+                     <span>Basculer</span>
+                   </button>`
+            }
+          </div>
+        `;
+
+        item.querySelector(".net-action-btn")?.addEventListener("click", () => {
+          tapFeedback(15);
+          if (isTv) {
+            setActiveRemoteTarget("tv", dev);
+            overlay.remove();
+            showToast(`📺 Cible : ${dev.name}`, "info");
+            if (switchTab) switchTab("tv-remote");
+          } else {
+            localStorage.setItem("nexus.host", dev.ip);
+            localStorage.setItem("nexus.hostname", dev.name);
+            overlay.remove();
+            location.reload();
+          }
+        });
+
+        list.appendChild(item);
+      }
+    }
+
+    // 4. Formulaire d'ajout / test manuel d'une IP
+    const manualBox = document.createElement("form");
+    manualBox.className = "pt-2 border-t border-white/5 flex gap-2";
+    manualBox.innerHTML = `
+      <input type="text" placeholder="IP personnalisée (ex: 192.168.1.50)" class="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-white/30 font-mono outline-none focus:border-nexus-accent transition" />
+      <button type="submit" class="px-3 py-2 rounded-xl bg-white/10 hover:bg-nexus-accent text-white text-xs font-bold transition shrink-0">
+        Ajouter
+      </button>
+    `;
+    manualBox.onsubmit = async (e) => {
+      e.preventDefault();
+      const input = manualBox.querySelector("input")!;
+      const ip = input.value.trim();
+      if (!ip) return;
+      tapFeedback(12);
+      showToast(`Test de connexion à ${ip}…`, "info", 1500);
+
+      const pc = await probeHost(ip);
+      if (pc) {
+        showToast(`PC trouvé : ${pc.hostname}`, "info");
+        devices.push({
+          id: pc.ip,
+          name: pc.hostname,
+          ip: pc.ip,
+          type: "pc",
+          brand: "Nexus",
+          httpPort: pc.httpPort,
+          wsPort: pc.wsPort,
+          lastSeen: Date.now(),
+        });
+        render();
+        return;
+      }
+
+      devices.push({
+        id: ip,
+        name: `Smart TV (${ip})`,
+        ip,
+        type: "tv",
+        brand: "SmartTV",
+        protocol: "upnp",
+        lastSeen: Date.now(),
+      });
+      showToast(`Appareil ${ip} ajouté`, "info");
+      render();
+    };
+
+    card.append(head, filterBar, list, manualBox);
+  }
+
+  overlay.appendChild(card);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+
+  root.appendChild(overlay);
+  loadDevices();
+}
+
 /** Shell principal ultra-moderne Dark Glassmorphism */
 function mountShell(root: HTMLElement): void {
   root.className = "h-full flex flex-col justify-between overflow-hidden";
   root.innerHTML = "";
 
   const savedHost = localStorage.getItem("nexus.hostname") || localStorage.getItem("nexus.host") || "PC Connecté";
+
+  let showTab = (_tabId: string) => {};
 
   // 1. Barre d'en-tête supérieure
   const bar = document.createElement("header");
@@ -647,9 +959,19 @@ function mountShell(root: HTMLElement): void {
 
   statusWrap.append(dotContainer, textWrap);
 
-  // Bloc Actions rapides (Réglages & Déconnexion)
+  // Bloc Actions rapides (Appareils, Réglages & Déconnexion)
   const headerActions = document.createElement("div");
   headerActions.className = "flex items-center gap-1.5";
+
+  const devicesBtn = document.createElement("button");
+  devicesBtn.className =
+    "px-2.5 py-1.5 rounded-xl text-nexus-accent hover:text-white bg-nexus-accent/15 hover:bg-nexus-accent/25 border border-nexus-accent/30 transition flex items-center gap-1.5 text-xs font-bold shadow-sm";
+  devicesBtn.title = "Appareils du réseau (PC & Smart TVs)";
+  devicesBtn.innerHTML = "<span>📡</span><span>Appareils</span>";
+  devicesBtn.onclick = () => {
+    tapFeedback(12);
+    openNetworkDevicesModal(root, showTab);
+  };
 
   const settingsBtn = document.createElement("button");
   settingsBtn.className =
@@ -675,7 +997,7 @@ function mountShell(root: HTMLElement): void {
     }
   };
 
-  headerActions.append(settingsBtn, disconnectBtn);
+  headerActions.append(devicesBtn, settingsBtn, disconnectBtn);
   bar.append(statusWrap, headerActions);
 
   // Écoute de l'état de la connexion WebSocket
@@ -733,6 +1055,15 @@ function mountShell(root: HTMLElement): void {
       }
     }
   };
+
+  showTab = (tabId: string) => {
+    const tab = TABS.find((t) => t.id === tabId);
+    if (tab) show(tab);
+  };
+
+  window.addEventListener("nexus:open-network-devices", () => {
+    openNetworkDevicesModal(root, showTab);
+  });
 
   for (const tab of TABS) {
     const b = document.createElement("button");
