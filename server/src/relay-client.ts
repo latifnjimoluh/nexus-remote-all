@@ -1,7 +1,14 @@
 import { WebSocket } from "ws";
 import qrcodeTerminal from "qrcode-terminal";
 import { handleCommand } from "./ws/router.js";
-import { generateKeyB64url, keyFromB64url, encrypt, decrypt, isEnvelope } from "./e2e.js";
+import {
+  generateKeyB64url,
+  keyFromB64url,
+  encrypt,
+  decrypt,
+  isEnvelope,
+  validateReplay,
+} from "./e2e.js";
 import type { ServerMessage } from "../../shared/protocol.js";
 
 const CLOUD_RELAY_URL = process.env.NEXUS_RELAY_URL ?? "wss://remote.unlineservice.com/relay";
@@ -19,6 +26,8 @@ export function startRelayClient(): void {
   let reconnectTimer: NodeJS.Timeout | null = null;
   let heartbeatTimer: NodeJS.Timeout | null = null;
   let sessionKey: Buffer | null = null; // clé E2E (F5) de la session cloud courante
+  let lastReceivedSeq = 0; // F6 anti-rejeu
+  let serverSeq = 0; // Compteur pour les réponses sortantes
 
   function stopHeartbeat() {
     if (heartbeatTimer) {
@@ -72,6 +81,8 @@ export function startRelayClient(): void {
             // qui n'est jamais transmis au serveur web : le relais ne la voit pas.
             const keyB64url = generateKeyB64url();
             sessionKey = keyFromB64url(keyB64url);
+            lastReceivedSeq = 0;
+            serverSeq = 0;
             const sep = String(data.url).includes("#") ? "&" : "#";
             const secureUrl = `${data.url}${sep}k=${keyB64url}`;
             console.log("\n" + "═".repeat(60));
@@ -93,33 +104,60 @@ export function startRelayClient(): void {
 
           if (data.type === "relay:client_joined") {
             console.log("📱 Smartphone connecté avec succès via le Cloud !");
+            lastReceivedSeq = 0;
+            serverSeq = 0;
             return;
           }
 
           if (data.type === "relay:client_left") {
             console.log("📱 Smartphone déconnecté du Cloud.");
+            lastReceivedSeq = 0;
+            serverSeq = 0;
             return;
           }
 
-          // 2. Commande CHIFFRÉE E2E (F5) reçue depuis le téléphone via le relais.
-          //    Le relais ne transporte que des enveloppes opaques {n,d} : il ne
-          //    peut ni lire ni forger de commandes. On rejette tout ce qui n'est
-          //    pas une enveloppe valide (plus de commandes en clair via le cloud).
-          if (!isEnvelope(data) || !sessionKey) return;
+          // 2. Commande CHIFFRÉE E2E (F5/F6) reçue depuis le téléphone via le relais.
+          if (!sessionKey) return;
+          if (!isEnvelope(data)) {
+            console.warn("[Cloud Relay] Enveloppe ignorée: structure invalide ou champs seq/ts manquants.");
+            return;
+          }
+
+          // 1. Filtrage anti-rejeu strict O(1) AVANT déchiffrement
+          const replayCheck = validateReplay(data, lastReceivedSeq);
+          if (!replayCheck.valid) {
+            console.warn(`[Cloud Relay] Message rejeté par l'anti-rejeu: ${replayCheck.error}`);
+            return;
+          }
+
           let cmdType: ServerMessage["cmd"] = undefined;
           try {
-            const parsed = JSON.parse(decrypt(sessionKey, data)) as { type?: ServerMessage["cmd"] };
+            // 2. Déchiffrement et validation du tag GCM + AAD
+            const decrypted = decrypt(sessionKey, data);
+
+            // 3. Authentification cryptographique réussie : validation atomique du numéro de séquence
+            lastReceivedSeq = data.seq;
+
+            const parsed = JSON.parse(decrypted) as { type?: ServerMessage["cmd"] };
             cmdType = parsed.type;
             await handleCommand(parsed);
             if (socket.readyState === WebSocket.OPEN) {
-              const ack = encrypt(sessionKey, JSON.stringify({ type: "ack", cmd: cmdType } satisfies ServerMessage));
+              const ack = encrypt(
+                sessionKey,
+                JSON.stringify({ type: "ack", cmd: cmdType } satisfies ServerMessage),
+                ++serverSeq,
+                Date.now(),
+              );
               socket.send(JSON.stringify(ack));
             }
           } catch (err) {
+            console.warn("[Cloud Relay] Erreur lors du déchiffrement ou traitement:", err);
             if (socket.readyState === WebSocket.OPEN && sessionKey) {
               const env = encrypt(
                 sessionKey,
                 JSON.stringify({ type: "error", cmd: cmdType, payload: String(err) } satisfies ServerMessage),
+                ++serverSeq,
+                Date.now(),
               );
               socket.send(JSON.stringify(env));
             }

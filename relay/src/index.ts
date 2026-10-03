@@ -182,16 +182,25 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
     const session = sessions.get(codeParam)!;
 
-    // Session à client unique : refuse un 2e appareil (empêche le vol de session en cours).
-    if (session.clientWs && session.clientWs.readyState === WebSocket.OPEN) {
-      ws.send(
-        JSON.stringify({
-          type: "relay:error",
-          message: "Cette session est déjà utilisée par un autre appareil.",
-        }),
-      );
-      ws.close(4009, "already_paired");
-      return;
+    // Reconnexion client (Feature 16) : éviction immédiate de l'ancienne socket sans verrouillage 4009
+    if (session.clientWs && session.clientWs !== ws) {
+      const oldWs = session.clientWs;
+      console.log(`[RELAY] Reconnexion client pour la session [${codeParam}] — éviction immédiate de l'ancienne socket`);
+      wsToSession.delete(oldWs);
+      try {
+        oldWs.removeAllListeners("close");
+        if (oldWs.readyState === WebSocket.OPEN) {
+          try {
+            oldWs.send(
+              JSON.stringify({
+                type: "relay:error",
+                message: "Session reprise par une nouvelle connexion.",
+              }),
+            );
+          } catch {}
+        }
+        oldWs.terminate();
+      } catch {}
     }
 
     session.clientWs = ws;
@@ -212,9 +221,11 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     ws.on("close", () => {
       console.log(`[RELAY] Client smartphone déconnecté [${codeParam}]`);
       if (sessions.has(codeParam)) {
-        session.clientWs = null;
-        if (session.agentWs.readyState === WebSocket.OPEN) {
-          session.agentWs.send(JSON.stringify({ type: "relay:client_left" }));
+        if (session.clientWs === ws) {
+          session.clientWs = null;
+          if (session.agentWs.readyState === WebSocket.OPEN) {
+            session.agentWs.send(JSON.stringify({ type: "relay:client_left" }));
+          }
         }
       }
       wsToSession.delete(ws);
@@ -226,8 +237,8 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
   ws.close(4000, "invalid_role");
 });
 
-// Heartbeat sweep toutes les 30s pour purger les connexions interrompues brutalement
-setInterval(() => {
+// Heartbeat sweep toutes les 15s pour purger les connexions interrompues brutalement
+const heartbeatInterval = setInterval(() => {
   wss.clients.forEach((ws) => {
     if ((ws as any).isAlive === false) {
       return ws.terminate();
@@ -239,7 +250,10 @@ setInterval(() => {
       ws.terminate();
     }
   });
-}, 30000);
+}, 15000);
+if (typeof heartbeatInterval.unref === "function") {
+  heartbeatInterval.unref();
+}
 
 // Nettoyage régulier : sessions orphelines (>24h) + compteurs de rate-limiting expirés.
 setInterval(() => {

@@ -11,6 +11,38 @@ interface TvCommandResult {
   error?: string;
 }
 
+const ROKU_KEY_MAP: Record<string, string> = Object.freeze({
+  volup: "VolumeUp",
+  voldown: "VolumeDown",
+  mute: "VolumeMute",
+  play: "Play",
+  pause: "Play",
+  stop: "Back",
+  power: "PowerOff",
+  home: "Home",
+  back: "Back",
+  menu: "Info",
+  ok: "Select",
+  up: "Up",
+  down: "Down",
+  left: "Left",
+  right: "Right",
+});
+
+const ROKU_APP_IDS: Record<string, string> = Object.freeze({
+  netflix: "12",
+  youtube: "837",
+  primevideo: "13",
+  spotify: "22271",
+});
+
+const VIDAA_APP_MAP: Record<string, string> = Object.freeze({
+  netflix: "Netflix",
+  youtube: "YouTube",
+  primevideo: "PrimeVideo",
+  browser: "Browser",
+});
+
 /** Envoie une requête SOAP UPnP */
 async function callSoap(url: string, serviceType: string, action: string, argsXml = ""): Promise<{ ok: boolean; text: string }> {
   const soapBody = `<?xml version="1.0" encoding="utf-8"?>
@@ -207,37 +239,14 @@ export async function sendTvCommand(
 
   // --- 1. Cas ROKU ---
   if (dev.protocol === "roku") {
-    const keyMap: Record<string, string> = {
-      volup: "VolumeUp",
-      voldown: "VolumeDown",
-      mute: "VolumeMute",
-      play: "Play",
-      pause: "Play",
-      stop: "Back",
-      power: "PowerOff",
-      home: "Home",
-      back: "Back",
-      menu: "Info",
-      ok: "Select",
-      up: "Up",
-      down: "Down",
-      left: "Left",
-      right: "Right",
-    };
-
     if (action === "app" && typeof value === "string") {
-      const appIds: Record<string, string> = {
-        netflix: "12",
-        youtube: "837",
-        primevideo: "13",
-        spotify: "22271",
-      };
-      const id = appIds[value.toLowerCase()] || value;
+      const lower = value.toLowerCase();
+      const id = Object.hasOwn(ROKU_APP_IDS, lower) ? ROKU_APP_IDS[lower] : value;
       const ok = await launchRokuApp(dev.ip, id);
       return { ok, message: ok ? `Roku lancé : ${value}` : "Erreur lancement Roku" };
     }
 
-    const rokuKey = keyMap[action] || action;
+    const rokuKey = Object.hasOwn(ROKU_KEY_MAP, action) ? ROKU_KEY_MAP[action] : action;
     const ok = await sendRokuKey(dev.ip, rokuKey);
     return { ok, message: ok ? `Roku : ${rokuKey}` : "Erreur commande Roku" };
   }
@@ -292,13 +301,8 @@ export async function sendTvCommand(
     }
     case "app": {
       if (typeof value === "string") {
-        const appMap: Record<string, string> = {
-          netflix: "Netflix",
-          youtube: "YouTube",
-          primevideo: "PrimeVideo",
-          browser: "Browser",
-        };
-        const appName = appMap[value.toLowerCase()] || value;
+        const lower = value.toLowerCase();
+        const appName = Object.hasOwn(VIDAA_APP_MAP, lower) ? VIDAA_APP_MAP[lower] : value;
         const ok = await launchVidaaOrDialApp(dev.ip, appName);
         return { ok, message: ok ? `Lancement TV : ${appName}` : `Application ${appName} demandée` };
       }

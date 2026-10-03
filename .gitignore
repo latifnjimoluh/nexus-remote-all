@@ -28,3 +28,6 @@ Thumbs.db
 # Tests
 test-results/
 playwright-report/
+
+# Multi-agent coordination logs & transcripts
+.agents/

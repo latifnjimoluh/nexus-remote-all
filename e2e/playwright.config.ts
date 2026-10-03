@@ -10,8 +10,10 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 7_000 },
   reporter: [["list"]],
+  workers: 1,
   use: {
     ...devices["Desktop Chrome"],
+    hasTouch: true,
     headless: true,
     screenshot: "only-on-failure",
   },

@@ -1,5 +1,5 @@
 import type { Command } from "@shared/protocol";
-import { importKey, encrypt } from "./e2e";
+import { importKey, encrypt, decrypt, isEnvelope } from "./e2e";
 
 export type Status = "connecting" | "open" | "closed";
 
@@ -14,6 +14,7 @@ let statusCb: (s: Status) => void = () => {};
 let errorCb: (msg: string) => void = () => {};
 let shouldReconnect = true;
 let cryptoKey: CryptoKey | null = null; // clé E2E (F5), mode cloud uniquement
+let clientSeq = 0; // Compteur de séquence anti-rejeu (F6)
 let sendChain: Promise<void> = Promise.resolve(); // sérialise le chiffrement pour préserver l'ordre
 
 /** Abonnement à l'état de la connexion. */
@@ -35,6 +36,7 @@ export function connect(config: ConnectionConfig): void {
   currentConfig = config;
   shouldReconnect = true;
   cryptoKey = null;
+  clientSeq = 0;
 
   if (config.mode === "cloud") {
     // F5 — le mode cloud EXIGE la clé de chiffrement (transmise via le QR).
@@ -94,6 +96,7 @@ function open(): void {
     socket = new WebSocket(url);
 
     socket.onopen = () => {
+      clientSeq = 0;
       statusCb("open");
       try {
         const details = getDeviceDetails();
@@ -102,9 +105,18 @@ function open(): void {
       flush();
     };
 
-    socket.onmessage = (e) => {
+    socket.onmessage = async (e) => {
       try {
-        const data = JSON.parse(e.data);
+        let data = JSON.parse(e.data);
+        // Si le mode est Cloud et qu'une clé est disponible, déchiffrer l'enveloppe entrante
+        if (currentConfig?.mode === "cloud" && cryptoKey && isEnvelope(data)) {
+          try {
+            const pt = await decrypt(cryptoKey, data);
+            data = JSON.parse(pt);
+          } catch {
+            return;
+          }
+        }
         if (data.type === "relay:error") {
           errorCb(data.message || "Erreur de relais");
         } else if (data.type === "error" && typeof data.payload === "string") {
@@ -154,7 +166,12 @@ export function disconnect(): void {
   shouldReconnect = false;
   socket?.close();
   socket = null;
+  clientSeq = 0;
+  queue = [];
 }
+
+const MAX_OFFLINE_QUEUE_SIZE = 50;
+const WS_BACKPRESSURE_THRESHOLD = 32 * 1024; // 32 Ko
 
 /** Prêt à émettre : socket ouvert + (en cloud) clé E2E importée. */
 function ready(): boolean {
@@ -163,26 +180,66 @@ function ready(): boolean {
   return true;
 }
 
+/** Indique si le client WebSocket est connecté et prêt à émettre (en clair ou E2EE prêt). */
+export function isReady(): boolean {
+  return ready();
+}
+
+/** Alias de isReady pour conformité d'interface. */
+export function isConnected(): boolean {
+  return ready();
+}
+
+/** Utilitaire d'observabilité et de test : taille actuelle de la file d'attente hors-ligne. */
+export function getQueueSize(): number {
+  return queue.length;
+}
+
+/** Utilitaire de test : vide la file d'attente hors-ligne. */
+export function clearQueue(): void {
+  queue = [];
+}
+
 /** Vide la file d'attente une fois la connexion (et la clé) prêtes. */
 function flush(): void {
   if (!ready()) return;
   const items = queue;
   queue = [];
-  for (const c of items) frameAndSend(c);
+  // Élimine les deltas de mouvement résiduels accumulés pendant la déconnexion
+  const filtered = items.filter((c) => c.type !== "mouse:move" && c.type !== "mouse:scroll");
+  for (const c of filtered) frameAndSend(c);
 }
 
 /** Encode puis émet une commande : chiffrée E2E en mode cloud, en clair en local. */
 function frameAndSend(cmd: Command): void {
   if (!ready()) {
+    // Élimination immédiate des deltas éphémères hors-ligne
+    if (cmd.type === "mouse:move" || cmd.type === "mouse:scroll") {
+      return;
+    }
+    // File bornée avec éviction FIFO de la plus ancienne commande
+    if (queue.length >= MAX_OFFLINE_QUEUE_SIZE) {
+      queue.shift();
+    }
     queue.push(cmd);
     return;
   }
+
+  // Contre-pression active : éliminer les deltas de mouvement si le buffer réseau est saturé
+  if (cmd.type === "mouse:move" || cmd.type === "mouse:scroll") {
+    if (socket && socket.bufferedAmount > WS_BACKPRESSURE_THRESHOLD) {
+      return;
+    }
+  }
+
   if (currentConfig?.mode === "cloud") {
     const key = cryptoKey!;
     // Sérialisé pour garantir l'ordre malgré l'asynchronisme du chiffrement.
     sendChain = sendChain
       .then(async () => {
-        const env = await encrypt(key, JSON.stringify(cmd));
+        const seq = ++clientSeq;
+        const ts = Date.now();
+        const env = await encrypt(key, JSON.stringify(cmd), seq, ts);
         if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(env));
       })
       .catch(() => {});

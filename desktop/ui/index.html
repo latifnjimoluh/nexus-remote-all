@@ -911,24 +911,47 @@
         const icon = getDeviceIcon(c.device);
         const name = c.name || c.device || "Mobile";
 
-        item.innerHTML = `
-          <div class="client-device-icon">${icon}</div>
-          <div class="client-details">
-            <div class="client-device-name">
-              <span>${name}</span>
-              <span class="client-pulse-dot" title="En ligne"></span>
-            </div>
-            <div class="client-device-meta">${c.ip} &bull; Contrôle actif</div>
-          </div>
-          <button class="client-kick" title="Déconnecter cet appareil">✕ Déconnecter</button>
-        `;
+        const iconDiv = document.createElement("div");
+        iconDiv.className = "client-device-icon";
+        iconDiv.textContent = icon;
 
-        item.querySelector(".client-kick").onclick = async () => {
+        const detailsDiv = document.createElement("div");
+        detailsDiv.className = "client-details";
+
+        const nameDiv = document.createElement("div");
+        nameDiv.className = "client-device-name";
+
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = name;
+
+        const pulseDot = document.createElement("span");
+        pulseDot.className = "client-pulse-dot";
+        pulseDot.title = "En ligne";
+
+        nameDiv.appendChild(nameSpan);
+        nameDiv.appendChild(pulseDot);
+
+        const metaDiv = document.createElement("div");
+        metaDiv.className = "client-device-meta";
+        metaDiv.textContent = `${c.ip || ""} • Contrôle actif`;
+
+        detailsDiv.appendChild(nameDiv);
+        detailsDiv.appendChild(metaDiv);
+
+        const kickBtn = document.createElement("button");
+        kickBtn.className = "client-kick";
+        kickBtn.title = "Déconnecter cet appareil";
+        kickBtn.textContent = "✕ Déconnecter";
+        kickBtn.onclick = async () => {
           if (window.nexus && window.nexus.disconnectClient) {
             await window.nexus.disconnectClient(c.id);
             showToast("Appareil déconnecté");
           }
         };
+
+        item.appendChild(iconDiv);
+        item.appendChild(detailsDiv);
+        item.appendChild(kickBtn);
         list.appendChild(item);
       });
     }

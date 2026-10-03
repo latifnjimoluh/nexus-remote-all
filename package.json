@@ -18,12 +18,19 @@
     "dev:client": "npm run dev -w client",
     "dev:relay": "npm run dev -w relay",
     "dev": "concurrently -n server,client -c blue,magenta \"npm:dev:server\" \"npm:dev:client\"",
-    "build": "npm run build -w server && npm run build -w client && npm run build -w relay",
+    "build": "npm run build -w server && npm run build -w client && npm run build -w relay && npm run build -w desktop",
     "desktop": "npm run dev -w desktop",
     "desktop:dist": "npm run build -w server && npm run build -w client && npm run dist -w desktop",
     "start": "npm run start -w server",
-    "test": "node test_e2e.mjs",
-    "typecheck": "npm run typecheck -w server && npm run typecheck -w client && npm run typecheck -w relay"
+    "test": "node tests/run_all.mjs",
+    "test:unit": "npm run test:unit -w server",
+    "test:integration": "node tests/tier2_integration/index.mjs",
+    "test:resilience": "node tests/tier3_resilience/index.mjs",
+    "test:tier2": "node tests/tier2_integration/index.mjs",
+    "test:tier3": "node tests/tier3_resilience/index.mjs",
+    "test:e2e": "node test_e2e.mjs",
+    "test:playwright": "npm --prefix e2e test",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w client && npm run typecheck -w relay && npm run typecheck -w desktop"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

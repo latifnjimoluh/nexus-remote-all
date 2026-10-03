@@ -12,10 +12,46 @@ const BUTTONS: Record<MouseButton, Button> = {
   middle: Button.MIDDLE,
 };
 
-/** Déplacement RELATIF du curseur (le cœur du trackpad). */
-export async function moveRelative(dx: number, dy: number): Promise<void> {
-  const p = await mouse.getPosition();
-  await mouse.setPosition(new Point(Math.round(p.x + dx), Math.round(p.y + dy)));
+
+/**
+ * File d'attente d'exécution sérialisée (Promise chain) éliminant la race condition
+ * "Lost Update" sur les appels concurrents à getPosition() et setPosition().
+ */
+let moveQueue: Promise<void> = Promise.resolve();
+
+/**
+ * Déplacement RELATIF du curseur (le cœur du trackpad).
+ * Exécute chaque mouvement de manière strictement séquentielle via une file FIFO.
+ */
+export function moveRelative(dx: number, dy: number): Promise<void> {
+  const roundedDx = Math.round(dx);
+  const roundedDy = Math.round(dy);
+
+  // Optimisation : ignorer les deltas nuls sans appel système
+  if (roundedDx === 0 && roundedDy === 0) {
+    return Promise.resolve();
+  }
+
+  const task = async () => {
+    const p = await mouse.getPosition();
+    await mouse.setPosition(new Point(p.x + roundedDx, p.y + roundedDy));
+  };
+
+  // Enchaînement : s'exécute séquentiellement même si la tâche précédente a échoué
+  const next = moveQueue.then(task, task);
+  // Auto-réparation de la file pour éviter la propagation d'erreurs orphelines
+  moveQueue = next.catch(() => {});
+  return next;
+}
+
+/** Utilitaire de test : attend que tous les mouvements en attente soient vidés. */
+export function waitForMoveQueue(): Promise<void> {
+  return moveQueue;
+}
+
+/** Utilitaire de test : réinitialise la chaîne de promesses. */
+export function resetMoveQueue(): void {
+  moveQueue = Promise.resolve();
 }
 
 export async function click(button: MouseButton): Promise<void> {

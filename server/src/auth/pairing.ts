@@ -2,38 +2,153 @@ import { Router, type Request, type Response, type NextFunction } from "express"
 import jwt from "jsonwebtoken";
 import QRCode from "qrcode";
 import os from "node:os";
+import { randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import { CONFIG } from "../config.js";
-import { getLocalIp, localAddresses } from "../net.js";
+import { getLocalIp } from "../net.js";
 import { getClientDist } from "../state.js";
 import { getDiscoveredDevices, runNetworkScan } from "../discovery/scanner.js";
 import { sendTvCommand } from "../controllers/tv.js";
+import { requireAuth } from "./middleware.js";
 
 export const pairingRouter = Router();
 
-// Gestion du code PIN d'appairage style Bluetooth
-let activePin = generateRandomPin();
-let failedAttempts = 0;
-let lockoutUntil = 0;
+// ============================================================================
+// Feature 4: Cryptographically secure PIN lifecycle & TTL
+// ============================================================================
 
-function generateRandomPin(): string {
-  // Code à 6 chiffres aléatoires (100000 - 999999)
-  return Math.floor(100000 + Math.random() * 900000).toString();
+/** Durée de validité maximale d'un code PIN (5 minutes). */
+export const PIN_TTL_MS = 5 * 60 * 1000;
+
+let activePin = generateRandomPin();
+let pinCreatedAt = Date.now();
+
+/**
+ * Génère un code PIN à 6 chiffres aléatoires cryptographiquement sécurisé (100000 - 999999).
+ * Utilise CSPRNG node:crypto (randomInt) au lieu de Math.random().
+ */
+export function generateRandomPin(): string {
+  return randomInt(100000, 1000000).toString();
 }
 
 export function formatPin(pin: string): string {
   return `${pin.slice(0, 3)} ${pin.slice(3)}`;
 }
 
-export function getActivePin(): string {
+/** Indique si le code PIN actif actuel a expiré. */
+export function isPinExpired(now: number = Date.now()): boolean {
+  return now - pinCreatedAt >= PIN_TTL_MS;
+}
+
+/**
+ * Récupère le code PIN actif. S'il a expiré, il est automatiquement renouvelé.
+ */
+export function getActivePin(now: number = Date.now()): string {
+  if (isPinExpired(now)) {
+    refreshActivePin();
+  }
   return activePin;
 }
 
+/**
+ * Force le renouvellement immédiat du code PIN et réinitialise son horodatage.
+ */
 export function refreshActivePin(): string {
   activePin = generateRandomPin();
-  failedAttempts = 0;
-  lockoutUntil = 0;
+  pinCreatedAt = Date.now();
   return activePin;
 }
+
+// ============================================================================
+// Feature 5: Per-IP Rate Limiting sur la vérification PIN
+// ============================================================================
+
+export interface IpRateLimitRecord {
+  attempts: number;
+  lockoutUntil: number;
+  lastAttemptAt: number;
+}
+
+export const MAX_PIN_FAILED_ATTEMPTS = 5;
+export const PIN_LOCKOUT_MS = 60_000; // 60 secondes
+export const RATE_LIMIT_CLEANUP_INTERVAL_MS = 60_000; // 1 minute
+export const STALE_RECORD_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+const ipRateLimits = new Map<string, IpRateLimitRecord>();
+
+/**
+ * Extrait l'adresse IP cliente brute depuis la socket TCP sans se fier aux
+ * en-têtes X-Forwarded-For non fiables sur le réseau local.
+ */
+export function extractClientIp(req: Request): string {
+  const raw = req.socket.remoteAddress ?? "127.0.0.1";
+  return raw.replace(/^::ffff:/, "").toLowerCase();
+}
+
+export function getIpRateLimit(clientIp: string): IpRateLimitRecord {
+  let record = ipRateLimits.get(clientIp);
+  if (!record) {
+    record = { attempts: 0, lockoutUntil: 0, lastAttemptAt: Date.now() };
+    ipRateLimits.set(clientIp, record);
+  }
+  return record;
+}
+
+export function resetIpAttempts(clientIp: string): void {
+  ipRateLimits.delete(clientIp);
+}
+
+export function cleanupIpRateLimits(now: number = Date.now()): void {
+  for (const [ip, record] of ipRateLimits.entries()) {
+    const isLockoutExpired = now >= record.lockoutUntil;
+    const isStale = now - record.lastAttemptAt >= STALE_RECORD_TTL_MS;
+    if (isLockoutExpired && (record.attempts === 0 || isStale)) {
+      ipRateLimits.delete(ip);
+    }
+  }
+}
+
+export function clearAllRateLimits(): void {
+  ipRateLimits.clear();
+}
+
+const cleanupTimer = setInterval(() => {
+  cleanupIpRateLimits();
+}, RATE_LIMIT_CLEANUP_INTERVAL_MS);
+
+if (typeof cleanupTimer.unref === "function") {
+  cleanupTimer.unref();
+}
+
+// ============================================================================
+// Feature 2: Restriction stricte à la boucle locale (Loopback-Only)
+// ============================================================================
+
+/**
+ * Vérifie si une adresse IP correspond strictement à l'interface de bouclage locale.
+ */
+export function isLoopbackAddress(ip?: string | null): boolean {
+  if (!ip) return false;
+  const normalized = ip.trim().toLowerCase();
+  if (normalized === "::1" || normalized === "127.0.0.1" || normalized === "::ffff:127.0.0.1") {
+    return true;
+  }
+  const stripped = normalized.startsWith("::ffff:") ? normalized.slice(7) : normalized;
+  return stripped === "127.0.0.1" || stripped.startsWith("127.");
+}
+
+export const requireHostOnly = (req: Request, res: Response, next: NextFunction): void => {
+  const remoteIp = req.socket.remoteAddress;
+
+  if (isLoopbackAddress(remoteIp)) {
+    next();
+    return;
+  }
+
+  res.status(403).json({
+    ok: false,
+    error: "Appairage direct accessible uniquement depuis le PC hôte (loopback).",
+  });
+};
 
 export interface PairingInfo {
   token: string;
@@ -46,44 +161,37 @@ export function isClientBuilt(): boolean {
   return getClientDist() !== null;
 }
 
+/**
+ * Génère un jeton JWT avec identifiant unique de client (sub) et de jeton (jti).
+ * Garantit l'isolation cryptographique stricte entre terminaux mobiles distincts.
+ */
+export function generateClientToken(ip: string, clientId: string = randomUUID()): string {
+  return jwt.sign(
+    {
+      role: "remote",
+      host: ip,
+      sub: clientId,
+      jti: clientId,
+    },
+    CONFIG.JWT_SECRET,
+    {
+      expiresIn: CONFIG.TOKEN_TTL,
+    },
+  );
+}
+
 /** Génère un token JWT signé et l'URL complète d'appairage. */
 export async function createPairingInfo(ip: string): Promise<PairingInfo> {
-  const token = jwt.sign({ role: "remote", host: ip }, CONFIG.JWT_SECRET, {
-    expiresIn: CONFIG.TOKEN_TTL,
-  });
+  const currentPin = getActivePin();
+  const token = generateClientToken(ip);
 
   const port = isClientBuilt() ? CONFIG.HTTP_PORT : CONFIG.CLIENT_PORT;
-  const pin = formatPin(activePin);
-  const url = `http://${ip}:${port}/?host=${ip}&ws=${CONFIG.WS_PORT}&token=${token}&pin=${activePin}`;
+  const pin = formatPin(currentPin);
+  const url = `http://${ip}:${port}/?host=${ip}&ws=${CONFIG.WS_PORT}&token=${token}&pin=${currentPin}`;
   const qrDataUrl = await QRCode.toDataURL(url, { margin: 2, scale: 6 });
 
   return { token, pin, url, qrDataUrl };
 }
-
-// F1 — L'accès direct au QR et jeton brut est autorisé pour le PC hôte et les appareils du réseau local privé (LAN)
-const requireHostOnly = (req: Request, res: Response, next: NextFunction): void => {
-  const ra = (req.socket.remoteAddress ?? "").replace("::ffff:", "").toLowerCase();
-  const localSet = localAddresses();
-
-  // Autorise localhost, ::1 et toutes les IP réseau de l'hôte
-  if (ra === "127.0.0.1" || ra === "::1" || localSet.has(ra)) {
-    next();
-    return;
-  }
-
-  // Autorise également les appareils du réseau local privé (LAN : 192.168.x.x, 10.x.x.x, 172.16-31.x.x)
-  const isPrivateLan =
-    ra.startsWith("192.168.") ||
-    ra.startsWith("10.") ||
-    /^172\.(1[6-9]|2\d|3[0-1])\./.test(ra);
-
-  if (isPrivateLan) {
-    next();
-    return;
-  }
-
-  res.status(403).json({ error: "Appairage direct accessible uniquement depuis le PC hôte ou le réseau local." });
-};
 
 // Endpoint API : données d'appairage complètes (QR + PIN)
 pairingRouter.get("/qr", requireHostOnly, async (req, res) => {
@@ -144,14 +252,22 @@ pairingRouter.get("/display", requireHostOnly, async (req, res) => {
  * Permet au smartphone de s'associer simplement en tapant le code PIN affiché sur le PC.
  */
 pairingRouter.post("/verify-pin", (req: Request, res: Response): void => {
+  const clientIp = extractClientIp(req);
   const now = Date.now();
-  if (now < lockoutUntil) {
-    const remaining = Math.ceil((lockoutUntil - now) / 1000);
+  const record = getIpRateLimit(clientIp);
+
+  if (now < record.lockoutUntil) {
+    const remaining = Math.ceil((record.lockoutUntil - now) / 1000);
     res.status(429).json({
       ok: false,
-      error: `Trop de tentatives. Veuillez patienter ${remaining}s avant de réessayer.`,
+      error: `Trop de tentatives depuis cette adresse IP. Veuillez patienter ${remaining}s avant de réessayer.`,
     });
     return;
+  }
+
+  if (record.lockoutUntil > 0 && now >= record.lockoutUntil) {
+    record.attempts = 0;
+    record.lockoutUntil = 0;
   }
 
   const rawPin = req.body?.pin;
@@ -160,15 +276,28 @@ pairingRouter.post("/verify-pin", (req: Request, res: Response): void => {
     return;
   }
 
-  const cleanInput = rawPin.replace(/\D/g, "");
-  const cleanActive = activePin.replace(/\D/g, "");
-
-  if (cleanInput.length === 6 && cleanInput === cleanActive) {
-    failedAttempts = 0;
-    const ip = getLocalIp();
-    const token = jwt.sign({ role: "remote", host: ip }, CONFIG.JWT_SECRET, {
-      expiresIn: CONFIG.TOKEN_TTL,
+  if (isPinExpired(now)) {
+    refreshActivePin();
+    res.status(401).json({
+      ok: false,
+      error: "Code PIN expiré. Un nouveau code à 6 chiffres a été généré sur l'écran du PC.",
     });
+    return;
+  }
+
+  const cleanInput = rawPin.replace(/\D/g, "");
+  const cleanActive = getActivePin().replace(/\D/g, "");
+
+  const isMatch =
+    cleanInput.length === 6 &&
+    cleanActive.length === 6 &&
+    timingSafeEqual(Buffer.from(cleanInput, "utf-8"), Buffer.from(cleanActive, "utf-8"));
+
+  if (isMatch) {
+    resetIpAttempts(clientIp);
+    const ip = getLocalIp();
+    const token = generateClientToken(ip);
+    refreshActivePin();
     res.json({
       ok: true,
       token,
@@ -179,12 +308,14 @@ pairingRouter.post("/verify-pin", (req: Request, res: Response): void => {
     return;
   }
 
-  failedAttempts++;
-  if (failedAttempts >= 5) {
-    lockoutUntil = Date.now() + 60_000;
+  record.attempts++;
+  record.lastAttemptAt = now;
+
+  if (record.attempts >= MAX_PIN_FAILED_ATTEMPTS) {
+    record.lockoutUntil = now + PIN_LOCKOUT_MS;
     res.status(429).json({
       ok: false,
-      error: "5 tentatives incorrectes. Appairage bloqué pendant 60 secondes.",
+      error: "5 tentatives incorrectes. Appairage bloqué pour votre adresse IP pendant 60 secondes.",
     });
     return;
   }
@@ -192,7 +323,7 @@ pairingRouter.post("/verify-pin", (req: Request, res: Response): void => {
   res.status(401).json({
     ok: false,
     error: "Code PIN incorrect. Vérifiez les 6 chiffres affichés sur votre écran de PC.",
-    attemptsLeft: 5 - failedAttempts,
+    attemptsLeft: MAX_PIN_FAILED_ATTEMPTS - record.attempts,
   });
 });
 
@@ -210,14 +341,20 @@ pairingRouter.get("/network-devices", async (req: Request, res: Response): Promi
 });
 
 /**
- * Relais de commandes vers les Smart TVs du réseau local (évite les restrictions CORS des navigateurs).
+ * Relais de commandes vers les Smart TVs du réseau local (protégé par authentification Bearer JWT).
  */
-pairingRouter.post("/tv/command", async (req: Request, res: Response): Promise<void> => {
+pairingRouter.post("/tv/command", requireAuth, async (req: Request, res: Response): Promise<void> => {
   const { targetIp, action, value } = req.body ?? {};
   if (!targetIp || typeof targetIp !== "string" || !action || typeof action !== "string") {
     res.status(400).json({ ok: false, error: "Paramètres targetIp et action requis." });
     return;
   }
+
+  if (targetIp.length > 64 || action.length > 32) {
+    res.status(400).json({ ok: false, error: "Paramètres hors limites autorisées." });
+    return;
+  }
+
   try {
     const result = await sendTvCommand(targetIp, action, value);
     res.json(result);
@@ -225,4 +362,5 @@ pairingRouter.post("/tv/command", async (req: Request, res: Response): Promise<v
     res.status(500).json({ ok: false, error: err?.message || String(err) });
   }
 });
+
 

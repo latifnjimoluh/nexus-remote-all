@@ -2,7 +2,7 @@
  * Module d'auto-détection, gestion des appareils du réseau (PC & Smart TVs),
  * et appairage par code PIN style Bluetooth sur le réseau local (LAN).
  */
-import { send } from "./ws-client";
+import { send, isReady } from "./ws-client";
 
 export interface DiscoveredHost {
   ip: string;
@@ -145,34 +145,46 @@ export async function fetchNetworkDevices(host?: string, refresh = false): Promi
 }
 
 /**
- * Envoie une commande TV soit via le WebSocket (si ouvert), soit par relais HTTP
+ * Envoie une commande TV de manière exclusive mono-canal (F18) :
+ * - Si le WebSocket est connecté et prêt, utilise exclusivement le canal WebSocket temps réel.
+ * - Si le WebSocket n'est pas prêt, bascule sur le relais HTTP fetch direct.
+ * Élimine toute double exécution ou saut de pas de volume.
  */
 export async function sendTvCommand(
   targetIp: string,
   action: string,
   value?: unknown,
 ): Promise<{ ok: boolean; message?: string; volume?: number; mute?: boolean }> {
-  // 1. Envoi via WebSocket (canal ultra-rapide)
-  try {
-    send({
-      type: "tv:command",
-      targetIp,
-      action,
-      value,
-    });
-  } catch {}
+  // 1. Canal prioritaire : WebSocket (temps réel ultra-rapide)
+  if (isReady()) {
+    try {
+      send({
+        type: "tv:command",
+        targetIp,
+        action,
+        value,
+      });
+      return { ok: true, message: `Action ${action} transmise via WebSocket` };
+    } catch {
+      // En cas d'erreur synchrone d'émission, repli sur le canal HTTP ci-dessous
+    }
+  }
 
-  // 2. Relais HTTP direct vers l'agent hôte
+  // 2. Canal de repli exclusif : Relais HTTP direct vers l'agent hôte
   const host =
     localStorage.getItem("nexus.host") ||
     (location.hostname !== "localhost" && /^\d+\.\d+\.\d+\.\d+$/.test(location.hostname) ? location.hostname : "127.0.0.1");
 
   const httpPort = location.port && /^\d+$/.test(location.port) ? location.port : "4700";
 
+  const token = localStorage.getItem("nexus.token");
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
   try {
     const res = await fetch(`http://${host}:${httpPort}/pair/tv/command`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({ targetIp, action, value }),
       mode: "cors",
       signal: AbortSignal.timeout(2500),

@@ -33,6 +33,7 @@ export function renderTrackpad(root: HTMLElement): void {
 
   // Surface tactile principale
   const padContainer = document.createElement("div");
+  padContainer.id = "trackpad";
   padContainer.className =
     "relative flex-1 rounded-3xl glass-panel border border-white/10 flex flex-col items-center justify-center overflow-hidden touch-none select-none shadow-[inset_0_2px_8px_rgba(0,0,0,0.4)]";
 
@@ -68,6 +69,52 @@ export function renderTrackpad(root: HTMLElement): void {
   let startTime = 0;
   let scrollAccumY = 0;
   let scrollAccumX = 0;
+
+  // ── GESTION DE LA COALESCENCE & DU BRIDAGE (Feature 15: rAF / 60 Hz) ──
+  let pendingDx = 0;
+  let pendingDy = 0;
+  let rafMoveId: number | null = null;
+  let lastMoveSendTime = 0;
+  const MIN_MOVE_INTERVAL_MS = 16; // Cible 60 Hz (~16.6 ms)
+
+  const requestFrame =
+    typeof requestAnimationFrame !== "undefined"
+      ? requestAnimationFrame
+      : (cb: FrameRequestCallback) => setTimeout(cb, 16) as unknown as number;
+
+  const cancelFrame =
+    typeof cancelAnimationFrame !== "undefined"
+      ? cancelAnimationFrame
+      : (id: number) => clearTimeout(id);
+
+  function flushPendingMove(): void {
+    if (pendingDx === 0 && pendingDy === 0) return;
+    const toSendX = Math.round(pendingDx);
+    const toSendY = Math.round(pendingDy);
+    pendingDx -= toSendX;
+    pendingDy -= toSendY;
+    if (toSendX !== 0 || toSendY !== 0) {
+      send({
+        type: "mouse:move",
+        dx: toSendX,
+        dy: toSendY,
+      });
+    }
+  }
+
+  function scheduleFlushMove(): void {
+    if (rafMoveId !== null) return;
+    rafMoveId = requestFrame(() => {
+      rafMoveId = null;
+      const now = performance.now();
+      if (now - lastMoveSendTime >= MIN_MOVE_INTERVAL_MS) {
+        lastMoveSendTime = now;
+        flushPendingMove();
+      } else {
+        scheduleFlushMove();
+      }
+    });
+  }
 
   padContainer.addEventListener(
     "touchstart",
@@ -175,11 +222,9 @@ export function renderTrackpad(root: HTMLElement): void {
           }
 
           const currentSensitivity = getTrackpadSensitivity();
-          send({
-            type: "mouse:move",
-            dx: Math.round(dx * currentSensitivity),
-            dy: Math.round(dy * currentSensitivity),
-          });
+          pendingDx += dx * currentSensitivity;
+          pendingDy += dy * currentSensitivity;
+          scheduleFlushMove();
         }
 
         lastSingle = { x: t.clientX, y: t.clientY };
@@ -193,8 +238,15 @@ export function renderTrackpad(root: HTMLElement): void {
       pointerPill.style.opacity = "0";
       const duration = Date.now() - startTime;
 
+      if (rafMoveId !== null) {
+        cancelFrame(rafMoveId);
+        rafMoveId = null;
+      }
+
       // Tap court sans mouvement
       if (!moved && duration < 260) {
+        pendingDx = 0;
+        pendingDy = 0;
         if (maxTouchCount >= 2) {
           // Tap à 2 doigts = Clic Droit
           tapFeedback(20, 1100);
@@ -204,6 +256,9 @@ export function renderTrackpad(root: HTMLElement): void {
           tapFeedback(15, 1300);
           send({ type: "mouse:click", button: "left" });
         }
+      } else {
+        // En cas de mouvement normal, vider immédiatement tout résidu en attente
+        flushPendingMove();
       }
 
       lastSingle = null;
@@ -219,6 +274,7 @@ export function renderTrackpad(root: HTMLElement): void {
       lastMid = null;
       scrollAccumY = 0;
       scrollAccumX = 0;
+      flushPendingMove();
     }
   };
 

@@ -96,8 +96,14 @@ const KEYMAP: Record<string, Key> = {
   End: Key.End,
 };
 
+Object.freeze(KEYMAP);
+
 /** Appui + relâchement d'une touche simple. */
 export async function tap(name: string): Promise<void> {
+  if (!Object.hasOwn(KEYMAP, name)) {
+    console.warn(`[Keyboard] Touche non reconnue : ${name}`);
+    return;
+  }
   const k = KEYMAP[name];
   if (k === undefined) {
     console.warn(`[Keyboard] Touche non reconnue : ${name}`);
@@ -109,7 +115,10 @@ export async function tap(name: string): Promise<void> {
 
 /** Combinaison de touches (ex: Win+Shift+S, Ctrl+C). Appui dans l'ordre, relâchement inverse. */
 export async function combo(names: string[]): Promise<void> {
-  const keys = names.map((n) => KEYMAP[n]).filter((k): k is Key => k !== undefined);
+  const keys = names
+    .filter((n) => typeof n === "string" && Object.hasOwn(KEYMAP, n))
+    .map((n) => KEYMAP[n])
+    .filter((k): k is Key => k !== undefined);
   if (keys.length === 0) return;
   for (const k of keys) await keyboard.pressKey(k);
   for (const k of [...keys].reverse()) await keyboard.releaseKey(k);

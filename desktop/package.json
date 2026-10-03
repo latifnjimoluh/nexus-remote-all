@@ -6,11 +6,13 @@
   "author": "Nexus Remote All",
   "main": "main.cjs",
   "scripts": {
+    "build": "npm run copy-assets",
     "copy-assets": "node scripts/copy-assets.cjs",
     "start": "npm run copy-assets && electron .",
     "dev": "npm run copy-assets && electron .",
     "dist": "npm run copy-assets && electron-builder --win",
-    "pack": "npm run copy-assets && electron-builder --win --dir"
+    "pack": "npm run copy-assets && electron-builder --win --dir",
+    "typecheck": "node --check main.cjs preload.cjs scripts/copy-assets.cjs"
   },
   "dependencies": {
     "@nut-tree-fork/nut-js": "^4.2.6",
