@@ -1,6 +1,6 @@
 {
   "name": "@nexus/relay",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "type": "module",
   "description": "Serveur Relais Cloud pour Nexus Remote All — interconnexion smartphone/PC par code PIN sans configuration réseau.",

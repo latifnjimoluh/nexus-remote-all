@@ -712,7 +712,7 @@
     <div class="brand">
       <div class="brand-icon">⚡</div>
       <div class="brand-info">
-        <h1>Nexus Remote All <span class="version-tag">v0.5.0</span></h1>
+        <h1>Nexus Remote All <span class="version-tag">v0.5.1</span></h1>
         <p>Serveur hôte & télécommande universelle pour PC</p>
       </div>
     </div>
@@ -734,23 +734,34 @@
     <div class="card">
       <div class="card-title">
         <span>📲 Appairage Rapide</span>
-        <span style="font-size: 0.75rem; color: var(--accent-light);">Wi-Fi Direct</span>
+        <span id="pairingBadge" style="font-size: 0.75rem; color: var(--accent-light);">Wi-Fi Direct</span>
       </div>
-      <div class="card-subtitle">Scannez ce QR Code avec l'appareil photo du smartphone</div>
+
+      <!-- Sélecteur de mode de connexion (Wi-Fi local vs Internet 4G) -->
+      <div style="display:flex; background:#0d0e17; border-radius:10px; padding:3px; gap:4px; margin: 8px 0 12px; border:1px solid var(--card-border);">
+        <button id="modeTabLan" style="flex:1; border:none; padding:6px; border-radius:8px; background:var(--accent); color:#fff; font-size:0.72rem; font-weight:700; cursor:pointer; transition:all 0.2s;">
+          📡 Wi-Fi Direct
+        </button>
+        <button id="modeTabCloud" style="flex:1; border:none; padding:6px; border-radius:8px; background:transparent; color:var(--text-muted); font-size:0.72rem; font-weight:700; cursor:pointer; transition:all 0.2s;">
+          ☁️ Internet / 4G
+        </button>
+      </div>
+
+      <div class="card-subtitle" id="pairingSub">Scannez ce QR Code avec l'appareil photo du smartphone</div>
 
       <div class="qr-frame" id="qrFrame" title="Cliquer pour afficher en grand">
         <img id="qr" alt="QR Code d'appairage" />
         <span class="qr-zoom-hint">🔍 Agrandir</span>
       </div>
 
-      <!-- Code PIN Bluetooth / LAN -->
+      <!-- Code PIN Bluetooth / LAN ou Cloud -->
       <div class="pin-box" id="pinCard" title="Cliquer pour copier le code">
         <div class="pin-header">
-          <span>Code d'appairage LAN</span>
+          <span id="pinLabel">Code d'appairage LAN</span>
           <span class="pin-copy-hint" id="pinCopyHint">Copier</span>
         </div>
         <div class="pin-value" id="pinCode">--- ---</div>
-        <div class="pin-footer">À saisir sur le mobile s'il détecte ce PC sur le réseau</div>
+        <div class="pin-footer" id="pinFooter">À saisir sur le mobile s'il détecte ce PC sur le réseau</div>
       </div>
 
       <!-- URL directe -->
@@ -956,8 +967,79 @@
       });
     }
 
+    let currentStatus = null;
+    let activePairingMode = "lan"; // "lan" | "cloud"
+
+    function updatePairingDisplay() {
+      if (!currentStatus) return;
+      const s = currentStatus;
+
+      const isLan = activePairingMode === "lan";
+      $("modeTabLan").style.background = isLan ? "var(--accent)" : "transparent";
+      $("modeTabLan").style.color = isLan ? "#fff" : "var(--text-muted)";
+      $("modeTabCloud").style.background = !isLan ? "var(--accent)" : "transparent";
+      $("modeTabCloud").style.color = !isLan ? "#fff" : "var(--text-muted)";
+
+      if (isLan) {
+        $("pairingBadge").textContent = "Wi-Fi Direct";
+        $("pairingSub").textContent = "Scannez avec le smartphone connecté au même Wi-Fi";
+        $("pinLabel").textContent = "Code d'appairage LAN";
+        $("pinFooter").textContent = "À saisir sur le mobile s'il détecte ce PC sur le réseau";
+
+        if (s.pairing) {
+          if ($("qr").src !== s.pairing.qrDataUrl) {
+            $("qr").src = s.pairing.qrDataUrl;
+            if ($("qrLarge")) $("qrLarge").src = s.pairing.qrDataUrl;
+          }
+          if ($("url").textContent !== s.pairing.url) {
+            $("url").textContent = s.pairing.url;
+            $("url").dataset.url = s.pairing.url;
+          }
+          if (s.pairing.pin && $("pinCode").textContent !== s.pairing.pin) {
+            $("pinCode").textContent = s.pairing.pin;
+            if ($("qrModalPin")) $("qrModalPin").textContent = s.pairing.pin;
+          }
+        }
+      } else {
+        $("pairingBadge").textContent = "Internet / 4G";
+        $("pairingSub").textContent = "Scannez pour contrôler à distance (hors Wi-Fi & 4G/5G)";
+        $("pinLabel").textContent = "Code PIN Relais Cloud";
+        $("pinFooter").textContent = "À saisir sur remote.unlineservice.com pour contrôler ce PC";
+
+        const cloud = s.cloud;
+        if (cloud && cloud.qrDataUrl) {
+          $("qr").src = cloud.qrDataUrl;
+          if ($("qrLarge")) $("qrLarge").src = cloud.qrDataUrl;
+          $("url").textContent = cloud.secureUrl || cloud.url || "https://remote.unlineservice.com";
+          $("url").dataset.url = cloud.secureUrl || cloud.url || "https://remote.unlineservice.com";
+          $("pinCode").textContent = cloud.pin || cloud.code || "--- ---";
+          if ($("qrModalPin")) $("qrModalPin").textContent = cloud.pin || cloud.code || "--- ---";
+        } else if (cloud && cloud.pin) {
+          $("pinCode").textContent = cloud.pin;
+          if ($("qrModalPin")) $("qrModalPin").textContent = cloud.pin;
+          $("url").textContent = `https://remote.unlineservice.com/?code=${cloud.code || ""}`;
+          $("url").dataset.url = `https://remote.unlineservice.com/?code=${cloud.code || ""}`;
+        } else {
+          $("pinCode").textContent = "Connexion Cloud…";
+          $("url").textContent = "https://remote.unlineservice.com";
+          $("url").dataset.url = "https://remote.unlineservice.com";
+        }
+      }
+    }
+
+    $("modeTabLan").addEventListener("click", () => {
+      activePairingMode = "lan";
+      updatePairingDisplay();
+    });
+
+    $("modeTabCloud").addEventListener("click", () => {
+      activePairingMode = "cloud";
+      updatePairingDisplay();
+    });
+
     function render(status) {
       if (!status) return;
+      currentStatus = status;
       if (status.booting) {
         setStatus("wait", "Démarrage…");
         return;
@@ -970,20 +1052,8 @@
       if (status.ip) $("ip").textContent = status.ip;
       if (status.httpPort) $("port").textContent = status.httpPort;
 
-      if (status.pairing) {
-        if ($("qr").src !== status.pairing.qrDataUrl) {
-          $("qr").src = status.pairing.qrDataUrl;
-          if ($("qrLarge")) $("qrLarge").src = status.pairing.qrDataUrl;
-        }
-        if ($("url").textContent !== status.pairing.url) {
-          $("url").textContent = status.pairing.url;
-          $("url").dataset.url = status.pairing.url;
-        }
-        if (status.pairing.pin && $("pinCode").textContent !== status.pairing.pin) {
-          $("pinCode").textContent = status.pairing.pin;
-          if ($("qrModalPin")) $("qrModalPin").textContent = status.pairing.pin;
-        }
-      }
+      updatePairingDisplay();
+
       if (status.clients !== undefined) {
         renderClients(status.clients);
       }

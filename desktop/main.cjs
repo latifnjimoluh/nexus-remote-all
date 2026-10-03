@@ -88,6 +88,16 @@ async function bootstrapAgent() {
       });
     }
 
+    if (agent.onCloudInfoChange) {
+      agent.onCloudInfoChange(async (cloud) => {
+        log("Cloud info updated, pin:", cloud.pin, "connected:", cloud.connected);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          const status = await getStatusPayload();
+          mainWindow.webContents.send("nexus:status-updated", status);
+        }
+      });
+    }
+
     if (mainWindow && !mainWindow.isDestroyed()) {
       const status = await getStatusPayload();
       mainWindow.webContents.send("nexus:status-updated", status);
@@ -268,6 +278,7 @@ async function getStatusPayload() {
     }
   }
   const clients = agent.getConnectedClients ? agent.getConnectedClients() : [];
+  const cloud = agent && agent.getCloudInfo ? agent.getCloudInfo() : null;
   return {
     ok: true,
     ip: agent.ip,
@@ -275,6 +286,7 @@ async function getStatusPayload() {
     wsPort: agent.wsPort,
     pairingDisplayUrl: agent.pairingDisplayUrl,
     pairing: cachedPairing,
+    cloud,
     clients,
   };
 }

@@ -125,6 +125,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     );
 
     ws.on("message", (data) => {
+      (ws as any).isAlive = true;
       // Relayer vers le client smartphone si connecté
       const s = sessions.get(code);
       if (s?.clientWs && s.clientWs.readyState === WebSocket.OPEN) {
@@ -198,8 +199,10 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
               }),
             );
           } catch {}
+          oldWs.close(4000, "Replaced by new connection");
+        } else {
+          oldWs.terminate();
         }
-        oldWs.terminate();
       } catch {}
     }
 
@@ -212,9 +215,18 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     session.agentWs.send(JSON.stringify({ type: "relay:client_joined" }));
 
     ws.on("message", (data) => {
+      (ws as any).isAlive = true;
+      const str = data.toString();
+      try {
+        const parsed = JSON.parse(str);
+        if (parsed && typeof parsed === "object" && parsed.type === "ping") {
+          ws.send(JSON.stringify({ type: "pong", ts: Date.now() }));
+          return;
+        }
+      } catch {}
       // Relayer directement la commande vers le PC hôte
       if (session.agentWs.readyState === WebSocket.OPEN) {
-        session.agentWs.send(data.toString());
+        session.agentWs.send(str);
       }
     });
 
@@ -237,7 +249,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
   ws.close(4000, "invalid_role");
 });
 
-// Heartbeat sweep toutes les 15s pour purger les connexions interrompues brutalement
+// Heartbeat sweep toutes les 30s pour purger les connexions interrompues brutalement
 const heartbeatInterval = setInterval(() => {
   wss.clients.forEach((ws) => {
     if ((ws as any).isAlive === false) {
@@ -250,7 +262,7 @@ const heartbeatInterval = setInterval(() => {
       ws.terminate();
     }
   });
-}, 15000);
+}, 30000);
 if (typeof heartbeatInterval.unref === "function") {
   heartbeatInterval.unref();
 }

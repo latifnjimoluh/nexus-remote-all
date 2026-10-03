@@ -10,7 +10,7 @@ import { verifyToken, revokeToken, requireAuth } from "./auth/middleware.js";
 import { pairingRouter, createPairingInfo, refreshActivePin, generateClientToken } from "./auth/pairing.js";
 import { publishService, stopService } from "./discovery/mdns.js";
 import { runNetworkScan } from "./discovery/scanner.js";
-import { startRelayClient } from "./relay-client.js";
+import { startRelayClient, getCloudSession, onCloudSessionChange, type CloudSessionInfo } from "./relay-client.js";
 import { getLocalIp, localAddresses } from "./net.js";
 import { setClientDist, getClientDist } from "./state.js";
 import type { ServerMessage } from "../../shared/protocol.js";
@@ -57,6 +57,10 @@ export interface AgentHandle {
   getConnectedClients: () => ConnectedClientInfo[];
   /** Notifie lors d'une connexion ou déconnexion d'un client. */
   onClientsChange?: (cb: (clients: ConnectedClientInfo[]) => void) => void;
+  /** Récupère l'état et le code de connexion du relais Cloud. */
+  getCloudInfo?: () => CloudSessionInfo;
+  /** Notifie lors d'une mise à jour de l'état du relais Cloud. */
+  onCloudInfoChange?: (cb: (cloud: CloudSessionInfo) => void) => void;
   /** Déconnecte un client spécifique. */
   disconnectClient?: (id: string) => void;
   /** Arrête le serveur, ferme tous les sockets et libère complètement les ports 4700 et 4701 (F12). */
@@ -149,12 +153,14 @@ export async function startAgent(options: AgentOptions = {}): Promise<AgentHandl
     if (!host) return false;
     const normalized = host.trim().replace(/^\[|\]$/g, "").toLowerCase();
 
-    // Fast-path pour les adresses de bouclage
+    // Fast-path pour les adresses de bouclage et domaine PWA officiel
     if (
       normalized === "localhost" ||
       normalized === "127.0.0.1" ||
       normalized === "::1" ||
-      normalized === "::ffff:127.0.0.1"
+      normalized === "::ffff:127.0.0.1" ||
+      normalized === "remote.unlineservice.com" ||
+      normalized.endsWith(".unlineservice.com")
     ) {
       return true;
     }
@@ -205,7 +211,7 @@ export async function startAgent(options: AgentOptions = {}): Promise<AgentHandl
     res.json({
       ok: true,
       service: CONFIG.SERVICE_NAME,
-      version: "0.5.0",
+      version: "0.5.1",
       ip,
       hostname: os.hostname(),
       httpPort,
@@ -351,10 +357,10 @@ export async function startAgent(options: AgentOptions = {}): Promise<AgentHandl
   }
 
   // ───────────────────────────────────────────────────────────
-  //  F10 — Balayage Heartbeat (Ping/Pong toutes les 15 secondes)
+  //  F10 — Balayage Heartbeat (Ping/Pong toutes les 30 secondes)
   // ───────────────────────────────────────────────────────────
   const heartbeatIntervalMs = Number(
-    process.env.NEXUS_HEARTBEAT_INTERVAL ?? (CONFIG as any).HEARTBEAT_INTERVAL ?? 15000,
+    process.env.NEXUS_HEARTBEAT_INTERVAL ?? (CONFIG as any).HEARTBEAT_INTERVAL ?? 30000,
   );
   const heartbeatInterval = setInterval(() => {
     for (const client of wss.clients) {
@@ -441,12 +447,19 @@ export async function startAgent(options: AgentOptions = {}): Promise<AgentHandl
         return;
       }
 
-      if (parsed && typeof parsed === "object" && (parsed as { type?: string }).type === "client:hello") {
-        const hello = parsed as { name?: string; device?: string };
-        if (hello.name) clientInfo.name = String(hello.name).slice(0, 50);
-        if (hello.device) clientInfo.device = String(hello.device).slice(0, 50);
-        notifyClientsChange();
-        return;
+      if (parsed && typeof parsed === "object") {
+        const pObj = parsed as Record<string, unknown>;
+        if (pObj.type === "ping") {
+          safeSend(ws, { type: "pong", ts: Date.now() } as any);
+          return;
+        }
+        if (pObj.type === "client:hello") {
+          const hello = pObj as { name?: string; device?: string };
+          if (hello.name) clientInfo.name = String(hello.name).slice(0, 50);
+          if (hello.device) clientInfo.device = String(hello.device).slice(0, 50);
+          notifyClientsChange();
+          return;
+        }
       }
 
       const cmdType =
@@ -574,6 +587,8 @@ export async function startAgent(options: AgentOptions = {}): Promise<AgentHandl
     onClientsChange: (cb: (clients: ConnectedClientInfo[]) => void) => {
       onClientsChangeCb = cb;
     },
+    getCloudInfo: () => getCloudSession(),
+    onCloudInfoChange: (cb: (cloud: CloudSessionInfo) => void) => onCloudSessionChange(cb),
     disconnectClient,
     stop,
     close: stop,

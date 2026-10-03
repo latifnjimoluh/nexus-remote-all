@@ -13,9 +13,31 @@ let currentConfig: ConnectionConfig | null = null;
 let statusCb: (s: Status) => void = () => {};
 let errorCb: (msg: string) => void = () => {};
 let shouldReconnect = true;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
+let reconnectTimer: any = null;
+let keepAliveTimer: any = null;
 let cryptoKey: CryptoKey | null = null; // clé E2E (F5), mode cloud uniquement
 let clientSeq = 0; // Compteur de séquence anti-rejeu (F6)
 let sendChain: Promise<void> = Promise.resolve(); // sérialise le chiffrement pour préserver l'ordre
+
+function stopKeepAlive(): void {
+  if (keepAliveTimer) {
+    clearInterval(keepAliveTimer);
+    keepAliveTimer = null;
+  }
+}
+
+function startKeepAlive(): void {
+  stopKeepAlive();
+  keepAliveTimer = setInterval(() => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      try {
+        socket.send(JSON.stringify({ type: "ping", ts: Date.now() }));
+      } catch {}
+    }
+  }, 15000);
+}
 
 /** Abonnement à l'état de la connexion. */
 export function onStatus(cb: (s: Status) => void): void {
@@ -35,8 +57,24 @@ export function isReconnecting(): boolean {
 export function connect(config: ConnectionConfig): void {
   currentConfig = config;
   shouldReconnect = true;
+  reconnectAttempts = 0;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
   cryptoKey = null;
   clientSeq = 0;
+
+  // Sécurité Contenu Mixte : un navigateur sur https:// bloque les WebSockets non sécurisés ws://
+  if (config.mode === "local" && location.protocol === "https:") {
+    shouldReconnect = false;
+    statusCb("closed");
+    errorCb(
+      `Connexion locale bloquée par le navigateur : les connexions directes Wi-Fi non chiffrées (ws://) sont interdites depuis un site sécurisé (https://). ` +
+      `Pour utiliser le Wi-Fi direct, ouvrez http://${config.host}:4700 sur votre smartphone, ou utilisez la connexion Cloud.`
+    );
+    return;
+  }
 
   if (config.mode === "cloud") {
     // F5 — le mode cloud EXIGE la clé de chiffrement (transmise via le QR).
@@ -60,7 +98,8 @@ function getSocketUrl(cfg: ConnectionConfig): string {
   if (cfg.mode === "cloud") {
     const isRemoteDomain = location.hostname.includes("unlineservice.com");
     const baseHost = isRemoteDomain ? location.host : "remote.unlineservice.com";
-    const proto = location.protocol === "https:" || isRemoteDomain ? "wss" : "ws";
+    // Le relais Cloud distant exige impérativement WSS
+    const proto = "wss";
     const code = cfg.code.replace(/\D/g, "");
     return `${proto}://${baseHost}/relay?role=client&code=${code}`;
   } else {
@@ -97,7 +136,9 @@ function open(): void {
 
     socket.onopen = () => {
       clientSeq = 0;
+      reconnectAttempts = 0;
       statusCb("open");
+      startKeepAlive();
       try {
         const details = getDeviceDetails();
         socket?.send(JSON.stringify({ type: "client:hello", ...details }));
@@ -137,8 +178,16 @@ function open(): void {
 
     socket.onclose = (e) => {
       statusCb("closed");
-      if (e.code === 4004 || e.code === 4008 || e.code === 4003 || e.code === 4001 || e.code === 1008) {
-        // Déconnecté par l'hôte ou code invalide : stopper immédiatement la reconnexion automatique
+      stopKeepAlive();
+      // Arrêt définitif de la reconnexion automatique pour les codes fatals
+      if (
+        e.code === 4000 || // Replaced by new connection (évite les batailles infinies d'éviction)
+        e.code === 4001 || // Unauthorized
+        e.code === 4003 || // Forbidden
+        e.code === 4004 || // Invalid PIN code
+        e.code === 4008 || // Heartbeat timeout / Kicked by host
+        e.code === 1008    // Policy violation
+      ) {
         shouldReconnect = false;
         try {
           localStorage.removeItem("nexus.token");
@@ -147,10 +196,30 @@ function open(): void {
             history.replaceState(null, "", location.pathname);
           }
         } catch {}
-        errorCb("Vous avez été déconnecté par l'ordinateur hôte.");
+        if (e.code === 4000) {
+          errorCb("Cette session de télécommande a été reprise par un autre appareil.");
+        } else if (e.code === 4004) {
+          errorCb("Code de connexion introuvable ou expiré.");
+        } else {
+          errorCb("Vous avez été déconnecté par l'ordinateur hôte.");
+        }
         return;
       }
-      if (shouldReconnect) setTimeout(open, 1500);
+
+      if (shouldReconnect) {
+        reconnectAttempts++;
+        if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+          shouldReconnect = false;
+          errorCb(
+            "Impossible d'établir la connexion après plusieurs tentatives. Vérifiez que l'application est bien lancée sur votre ordinateur et que vous êtes sur le bon réseau."
+          );
+          return;
+        }
+        // Backoff exponentiel progressif : 1.5s -> 2.5s -> 4s -> 6s max
+        const delay = Math.min(1500 * Math.pow(1.5, reconnectAttempts - 1), 6000);
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(open, delay);
+      }
     };
 
     socket.onerror = () => {
@@ -164,6 +233,12 @@ function open(): void {
 
 export function disconnect(): void {
   shouldReconnect = false;
+  reconnectAttempts = 0;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  stopKeepAlive();
   socket?.close();
   socket = null;
   clientSeq = 0;

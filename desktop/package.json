@@ -1,6 +1,6 @@
 {
   "name": "@nexus/desktop",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "Application de bureau Nexus Remote All — agent PC + appairage mobile (Electron).",
   "author": "Nexus Remote All",

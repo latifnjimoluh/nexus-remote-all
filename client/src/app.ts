@@ -30,27 +30,49 @@ import { renderPower } from "./modules/power";
 /** Lit la configuration depuis l'URL ou le localStorage */
 function readConfig(): ConnectionConfig | null {
   const q = new URLSearchParams(location.search);
-  const code = q.get("code") ?? localStorage.getItem("nexus.code");
+  const qCode = q.get("code");
+  const qHost = q.get("host");
+  const qPort = q.get("ws");
+  const qToken = q.get("token");
 
-  // Priorité 1 : Code PIN Cloud (mode AnyDesk)
-  if (code && code.replace(/\D/g, "").length === 6) {
-    const cleanCode = code.replace(/\D/g, "");
+  // Priorité 1 : Paramètres explicites passés dans l'URL (ex: scan de QR Code frais)
+  if (qCode && qCode.replace(/\D/g, "").length === 6) {
+    const cleanCode = qCode.replace(/\D/g, "");
     const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
     const key = hashParams.get("k") ?? localStorage.getItem("nexus.key") ?? undefined;
+    // Nettoyer les paramètres locaux pour éviter toute interférence
+    localStorage.removeItem("nexus.host");
+    localStorage.removeItem("nexus.port");
+    localStorage.removeItem("nexus.token");
     localStorage.setItem("nexus.code", cleanCode);
     if (key) localStorage.setItem("nexus.key", key);
     return { mode: "cloud", code: cleanCode, key };
   }
 
-  // Priorité 2 : Mode Local direct par IP
-  const host = q.get("host") ?? localStorage.getItem("nexus.host");
-  const port = q.get("ws") ?? localStorage.getItem("nexus.port");
-  const token = q.get("token") ?? localStorage.getItem("nexus.token");
-  if (host && port && token) {
-    localStorage.setItem("nexus.host", host);
-    localStorage.setItem("nexus.port", port);
-    localStorage.setItem("nexus.token", token);
-    return { host, port: Number(port), token, mode: "local" };
+  if (qHost && qToken) {
+    const port = Number(qPort || 4701);
+    // Nettoyer les paramètres cloud pour éviter tout conflit de mode
+    localStorage.removeItem("nexus.code");
+    localStorage.removeItem("nexus.key");
+    localStorage.setItem("nexus.host", qHost);
+    localStorage.setItem("nexus.port", String(port));
+    localStorage.setItem("nexus.token", qToken);
+    return { host: qHost, port, token: qToken, mode: "local" };
+  }
+
+  // Priorité 2 : Session sauvegardée dans le localStorage (si aucun paramètre dans l'URL)
+  const storedCode = localStorage.getItem("nexus.code");
+  if (storedCode && storedCode.replace(/\D/g, "").length === 6) {
+    const cleanCode = storedCode.replace(/\D/g, "");
+    const key = localStorage.getItem("nexus.key") ?? undefined;
+    return { mode: "cloud", code: cleanCode, key };
+  }
+
+  const storedHost = localStorage.getItem("nexus.host");
+  const storedPort = localStorage.getItem("nexus.port") || "4701";
+  const storedToken = localStorage.getItem("nexus.token");
+  if (storedHost && storedToken) {
+    return { host: storedHost, port: Number(storedPort), token: storedToken, mode: "local" };
   }
 
   return null;
