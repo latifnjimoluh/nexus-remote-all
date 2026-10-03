@@ -10,8 +10,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server/src/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test \"test/unit/**/*.test.ts\"",
-    "test:unit": "tsx --test \"test/unit/**/*.test.ts\""
+    "test": "tsx --test test/unit/validate.test.ts test/unit/pairing.test.ts test/unit/mouse.test.ts test/unit/middleware.test.ts test/unit/e2e.test.ts",
+    "test:unit": "tsx --test test/unit/validate.test.ts test/unit/pairing.test.ts test/unit/mouse.test.ts test/unit/middleware.test.ts test/unit/e2e.test.ts"
   },
   "dependencies": {
     "@nut-tree-fork/nut-js": "^4.2.6",
