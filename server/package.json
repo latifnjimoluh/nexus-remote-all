@@ -1,6 +1,6 @@
 {
   "name": "@nexus/server",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "description": "Serveur agent Nexus Remote All — pilote souris/clavier/système de l'hôte.",
