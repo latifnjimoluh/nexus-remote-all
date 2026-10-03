@@ -31,7 +31,7 @@ jobs:
         run: npm run build
 
       - name: 🧪 Exécution des tests End-to-End
-        run: npm test
+        run: xvfb-run --auto-servernum npm test
 
   deploy:
     name: 🚀 Déploiement VPS

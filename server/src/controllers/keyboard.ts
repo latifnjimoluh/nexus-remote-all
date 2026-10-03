@@ -98,8 +98,19 @@ const KEYMAP: Record<string, Key> = {
 
 Object.freeze(KEYMAP);
 
+/** Vérifie si un serveur d'affichage graphique est disponible (évite les crashs libxdo sous Linux headless). */
+function hasDisplay(): boolean {
+  if (process.platform === "linux") {
+    return Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
+  }
+  return true;
+}
+
 /** Appui + relâchement d'une touche simple. */
 export async function tap(name: string): Promise<void> {
+  if (!hasDisplay()) {
+    return;
+  }
   if (!Object.hasOwn(KEYMAP, name)) {
     console.warn(`[Keyboard] Touche non reconnue : ${name}`);
     return;
@@ -109,22 +120,40 @@ export async function tap(name: string): Promise<void> {
     console.warn(`[Keyboard] Touche non reconnue : ${name}`);
     return;
   }
-  await keyboard.pressKey(k);
-  await keyboard.releaseKey(k);
+  try {
+    await keyboard.pressKey(k);
+    await keyboard.releaseKey(k);
+  } catch (err) {
+    console.warn(`[Keyboard] Erreur simulation touche :`, err);
+  }
 }
 
 /** Combinaison de touches (ex: Win+Shift+S, Ctrl+C). Appui dans l'ordre, relâchement inverse. */
 export async function combo(names: string[]): Promise<void> {
+  if (!hasDisplay()) {
+    return;
+  }
   const keys = names
     .filter((n) => typeof n === "string" && Object.hasOwn(KEYMAP, n))
     .map((n) => KEYMAP[n])
     .filter((k): k is Key => k !== undefined);
   if (keys.length === 0) return;
-  for (const k of keys) await keyboard.pressKey(k);
-  for (const k of [...keys].reverse()) await keyboard.releaseKey(k);
+  try {
+    for (const k of keys) await keyboard.pressKey(k);
+    for (const k of [...keys].reverse()) await keyboard.releaseKey(k);
+  } catch (err) {
+    console.warn(`[Keyboard] Erreur simulation combo :`, err);
+  }
 }
 
 /** Saisie de texte / presse-papier (utilise le layout natif). */
 export async function typeText(text: string): Promise<void> {
-  await keyboard.type(text);
+  if (!hasDisplay()) {
+    return;
+  }
+  try {
+    await keyboard.type(text);
+  } catch (err) {
+    console.warn(`[Keyboard] Erreur saisie texte :`, err);
+  }
 }

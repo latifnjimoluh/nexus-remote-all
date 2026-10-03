@@ -13,6 +13,14 @@ const BUTTONS: Record<MouseButton, Button> = {
 };
 
 
+/** Vérifie si un serveur d'affichage graphique est disponible (évite les crashs libxdo sous Linux headless). */
+function hasDisplay(): boolean {
+  if (process.platform === "linux") {
+    return Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
+  }
+  return true;
+}
+
 /**
  * File d'attente d'exécution sérialisée (Promise chain) éliminant la race condition
  * "Lost Update" sur les appels concurrents à getPosition() et setPosition().
@@ -29,6 +37,10 @@ export function moveRelative(dx: number, dy: number): Promise<void> {
 
   // Optimisation : ignorer les deltas nuls sans appel système
   if (roundedDx === 0 && roundedDy === 0) {
+    return Promise.resolve();
+  }
+
+  if (!hasDisplay()) {
     return Promise.resolve();
   }
 
@@ -55,7 +67,12 @@ export function resetMoveQueue(): void {
 }
 
 export async function click(button: MouseButton): Promise<void> {
-  await mouse.click(BUTTONS[button]);
+  if (!hasDisplay()) return;
+  try {
+    await mouse.click(BUTTONS[button]);
+  } catch (err) {
+    console.warn(`[Mouse] Clic impossible :`, err);
+  }
 }
 
 /**
@@ -64,31 +81,46 @@ export async function click(button: MouseButton): Promise<void> {
  * dx > 0 = vers la droite, dx < 0 = vers la gauche
  */
 export async function scroll(dx: number, dy: number): Promise<void> {
+  if (!hasDisplay()) return;
   // Limiter l'amplitude par événement pour éviter tout gel du thread d'injection
   const safeDy = Math.min(Math.max(Math.round(dy), -20), 20);
   const safeDx = Math.min(Math.max(Math.round(dx), -20), 20);
 
-  if (safeDy) {
-    if (safeDy > 0) {
-      await mouse.scrollDown(safeDy);
-    } else {
-      await mouse.scrollUp(-safeDy);
+  try {
+    if (safeDy) {
+      if (safeDy > 0) {
+        await mouse.scrollDown(safeDy);
+      } else {
+        await mouse.scrollUp(-safeDy);
+      }
     }
-  }
 
-  if (safeDx) {
-    if (safeDx > 0) {
-      await mouse.scrollRight(safeDx);
-    } else {
-      await mouse.scrollLeft(-safeDx);
+    if (safeDx) {
+      if (safeDx > 0) {
+        await mouse.scrollRight(safeDx);
+      } else {
+        await mouse.scrollLeft(-safeDx);
+      }
     }
+  } catch (err) {
+    console.warn(`[Mouse] Défilement impossible :`, err);
   }
 }
 
 export async function dragStart(): Promise<void> {
-  await mouse.pressButton(Button.LEFT);
+  if (!hasDisplay()) return;
+  try {
+    await mouse.pressButton(Button.LEFT);
+  } catch (err) {
+    console.warn(`[Mouse] Glisser début impossible :`, err);
+  }
 }
 
 export async function dragEnd(): Promise<void> {
-  await mouse.releaseButton(Button.LEFT);
+  if (!hasDisplay()) return;
+  try {
+    await mouse.releaseButton(Button.LEFT);
+  } catch (err) {
+    console.warn(`[Mouse] Glisser fin impossible :`, err);
+  }
 }
